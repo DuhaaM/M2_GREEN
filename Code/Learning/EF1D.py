@@ -89,4 +89,5 @@ if __name__ == "__main__" :
             if(j < n//2):
                 plt.plot(x_iglob,P2impair_i_valeurs,label="P2_impair_"+str(2*j+1))
     plt.title("Polynômes lagrangiens d'ordre 2")
+    plt.savefig("P2_lagrange.png", dpi=150, bbox_inches="tight")
     plt.show()
