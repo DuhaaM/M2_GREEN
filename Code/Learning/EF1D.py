@@ -17,6 +17,12 @@ class MeshP2:  #Définition maillage
             (self.Elems).append(cell)
 
 
+def f(x):
+    return np.exp(-x/10)*np.sin(np.pi*x)*np.cos(np.pi**2*x)
+
+
+
+
 def P2_pair(i):
     def phi_2i(x):
 
@@ -64,14 +70,14 @@ def Init(Mesh,FuncInit):
         uh[i] = FuncInit( Mesh.Points[i] ) 
     return uh
 
-def SumCiP2(Mesh,C,x_iglob):
-    S=np.zeros(len(x_iglob))
-    for j in range (len(x_iglob)):
-        for k in range (Mesh.NPoints//2):
-            S[j]+=C[k]*P2_pair(k)(x_iglob[j])
-            if (k <= Mesh.NPoinrs//2 -1):
-                S[j]+=C[k]*P2_impair(k)(x_iglob[j])
-            
+def SumCiP2(Mesh,C,xx):
+    S=np.zeros(len(xx))
+    for j in range (len(xx)):
+        for k in range (Mesh.NPoints//2+1):
+            S[j]+=C[2*k]*P2_pair(k)(xx[j])
+            if (k <= Mesh.NPoints//2 -1):
+                S[j]+=C[2*k+1]*P2_impair(k)(xx[j])
+    return S
 
 
 if __name__ == "__main__" : 
@@ -84,6 +90,11 @@ if __name__ == "__main__" :
     x_i=Mesh.Points
     x_iglob=VisuMesh.Points
 
+
+
+   
+
+
     plt.clf()
     for j in range(0,n//2+1) :     
         P2pair_i_valeurs = Init(VisuMesh,P2_pair(j))
@@ -95,3 +106,16 @@ if __name__ == "__main__" :
     plt.title("Polynômes lagrangiens d'ordre 2")
     plt.savefig("P2_lagrange.png")
     plt.show()
+
+    C=[f(x) for x in x_i]
+
+    
+    plt.clf()  
+    plt.plot(x_iglob,f(x_iglob),label="Fonction à approcher ")
+    plt.plot(x_iglob,SumCiP2(Mesh,C,x_iglob),label="Approximation P2")
+    plt.legend()
+    plt.savefig("ApproximationP2.png")
+    plt.show()
+
+    print(f"Erreur:{np.linalg.norm(f(x_iglob)-SumCiP2(Mesh,C,x_iglob),np.inf)}")
+    
