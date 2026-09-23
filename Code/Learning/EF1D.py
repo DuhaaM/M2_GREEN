@@ -111,6 +111,24 @@ def InitA(Mesh):
     return A
 
 
+def Initb(f,Mesh):
+    b=[]
+    #Points et Poids de la méthode Gauss 3 points
+    p = np.array([-np.sqrt(3/5), 0, np.sqrt(3/5)])
+    w = np.array([5/9, 8/9, 5/9])
+    for i in range(len(Mesh.Points)):
+        S=0
+        for Elem in Mesh.Elems:
+            xa, xb = Mesh.Points[Elem[0]], Mesh.Points[Elem[2]]
+            for k in range(3):
+                u= xa + (p[k]+1)*(xb-xa)/2
+                S+= (xb-xa)/2 * w[k]* phi(i)(u)*f(u)
+        b.append(S)
+    return b
+                                    
+                                
+    
+
 
 
 
@@ -130,6 +148,9 @@ if __name__ == "__main__" :
 
    
     print(InitA(Mesh))
+    print(Initb(f,Mesh))
+
+    print(np.linalg.solve(InitA(Mesh),Initb(f,Mesh)))
 
     plt.clf()
     for j in range(0,n//2+1) :     
