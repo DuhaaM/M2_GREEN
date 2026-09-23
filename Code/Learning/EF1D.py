@@ -1,6 +1,6 @@
 import numpy as np 
 import matplotlib.pyplot as plt 
-
+from math import sqrt
 class MeshP2:  #Définition maillage 
     def __init__(self,a,b,n):
         self.a=a
@@ -80,6 +80,42 @@ def SumCiP2(Mesh,C,xx):
     return S
 
 
+def phi(i):  # fonction de base indice i 
+    if i % 2 == 0:
+        return P2_pair(i//2)
+    return P2_impair(i//2)
+
+def InitA(Mesh):
+    A=np.zeros((Mesh.NPoints,Mesh.NPoints))
+
+    #Points et Poids de la méthode Gauss 3 points
+    p = np.array([-np.sqrt(3/5), 0, np.sqrt(3/5)])
+    w = np.array([5/9, 8/9, 5/9])
+
+    for i in range(Mesh.NPoints):
+        for j in range(Mesh.NPoints):
+            if abs(j-i) > 2 :
+                A[i,j]=0
+            S = 0
+            phii,phij=phi(i),phi(j)
+            for Elem in Mesh.Elems : 
+                s = 0
+                if j in Elem and i in Elem :
+                    xa, xb = Mesh.Points[Elem[0]], Mesh.Points[Elem[2]]
+                    for k in range(3):
+                        u= xa + (p[k]+1)*(xb-xa)/2
+                        s+= w[k] * phii(u) * phij(u) 
+                    S+= s*(xb-xa)/2
+            A[i,j]= S
+
+    return A
+
+
+
+
+
+
+
 if __name__ == "__main__" : 
     a=0
     b=1
@@ -90,10 +126,10 @@ if __name__ == "__main__" :
     x_i=Mesh.Points
     x_iglob=VisuMesh.Points
 
-
+    print(len(Mesh.Elems[0]))
 
    
-
+    print(InitA(Mesh))
 
     plt.clf()
     for j in range(0,n//2+1) :     
