@@ -64,8 +64,14 @@ def Init(Mesh,FuncInit):
         uh[i] = FuncInit( Mesh.Points[i] ) 
     return uh
 
-
-
+def SumCiP2(Mesh,C,x_iglob):
+    S=np.zeros(len(x_iglob))
+    for j in range (len(x_iglob)):
+        for k in range (Mesh.NPoints//2):
+            S[j]+=C[k]*P2_pair(k)(x_iglob[j])
+            if (k <= Mesh.NPoinrs//2 -1):
+                S[j]+=C[k]*P2_impair(k)(x_iglob[j])
+            
 
 
 if __name__ == "__main__" : 
@@ -79,15 +85,13 @@ if __name__ == "__main__" :
     x_iglob=VisuMesh.Points
 
     plt.clf()
-    for j in range(0,Mesh.NPoints) : 
-        if (j <= n//2):
-            P2pair_i_valeurs = Init(VisuMesh,P2_pair(j))
-            if(j < n//2):
-                P2impair_i_valeurs= Init(VisuMesh,P2_impair(j))
-        if (j <= n//2):
-            plt.plot(x_iglob,P2pair_i_valeurs,label="P2_pair_"+str(2*j))
-            if(j < n//2):
-                plt.plot(x_iglob,P2impair_i_valeurs,label="P2_impair_"+str(2*j+1))
+    for j in range(0,n//2+1) :     
+        P2pair_i_valeurs = Init(VisuMesh,P2_pair(j))
+        if(j < n//2):
+             P2impair_i_valeurs= Init(VisuMesh,P2_impair(j))
+        plt.plot(x_iglob,P2pair_i_valeurs)
+        if(j < n//2):
+            plt.plot(x_iglob,P2impair_i_valeurs)
     plt.title("Polynômes lagrangiens d'ordre 2")
-    plt.savefig("P2_lagrange.png", dpi=150, bbox_inches="tight")
+    plt.savefig("P2_lagrange.png")
     plt.show()
