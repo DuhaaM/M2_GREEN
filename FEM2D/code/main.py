@@ -12,7 +12,7 @@ from matplotlib.tri import Triangulation
 import numpy as np
 
 from assembly import compute_errors
-from geometry import disk, peanut
+from geometry import Polygon, disk, peanut
 from mesh import build_mesh
 from solver import solve
 
@@ -23,6 +23,8 @@ LX, LY = 7.0, 5.0
 H, H_BETA, DELTA, M_BETA = 0.5, 0.15, 0.8, 1
 DISK = dict(center=(3.5, 2.5), R=1.0)
 PEANUT = dict(center=(3.1, 2.63), r0=0.8, eps=0.35)
+# Obstacle en L (non étoilé, avec un coin rentrant), sommets dans l'ordre du contour
+POLYGON = [(2.0, 1.5), (2.0, 3.5), (3.0, 3.5), (3.0, 2.5), (5.0, 2.5), (5.0, 1.5)]
 
 
 # ----------------------------------------------------------------------------
@@ -145,20 +147,20 @@ def validation():
     plot_convergence(hs, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
 
 
-def application():
-    print("\n=== Application : cacahuète, f = 1 ===")
-    obstacle = peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"])
+def application(name, obstacle, suffix=""):
+    print(f"\n=== Application : {name}, f = 1 ===")
     mesh = build_mesh(obstacle, LX, LY, H, H_BETA, DELTA, M_BETA)
     print(f"{mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, {len(mesh.quad)} quadrilatères, "
           f"{len(mesh.bnd)} nœuds de bord")
     U = solve(mesh, lambda x, y: np.ones_like(x))
     print(f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}")
-    plot_mesh(mesh, os.path.join(OUT, "maillage.png"))
-    plot_solution(mesh, U, os.path.join(OUT, "solution.png"), "Solution $u_h$ pour $f = 1$")
+    plot_mesh(mesh, os.path.join(OUT, f"maillage{suffix}.png"))
+    plot_solution(mesh, U, os.path.join(OUT, f"solution{suffix}.png"), "Solution $u_h$ pour $f = 1$")
 
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     validation()
-    application()
+    application("cacahuète", peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]))
+    application("polygone", Polygon(POLYGON), suffix="_polygone")
     print(f"\nFigures écrites dans {OUT}")
