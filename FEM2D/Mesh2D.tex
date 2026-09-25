@@ -35,7 +35,7 @@ donnée, on souhaite résoudre le problème
 (P)\quad
 \begin{cases}
 -\Delta u + u = f & \text{dans } D,\\[2pt]
-u = 0 & \text{sur } \partial\Omega \text{ et sur } \partial\beta .
+u = 0 & \text{sur } \partial D .
 \end{cases}
 \]
 
@@ -229,7 +229,7 @@ fixés), puis il remplit la zone entre les deux avec des triangles, en suivant
 la taille de maille $h_{\mathrm{loc}}(x)$ définie ci-dessus. La figure
 ci-dessous est produite par \texttt{code/main.py} avec les paramètres par
 défaut de la section~\ref{sec:parametres} ($\Omega = [0,7] \times [0,5]$,
-$h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$, $m_\beta = 0.45$, obstacle en
+$h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$, $m_\beta = 0.9$, obstacle en
 forme de cacahuète) ; le maillage compte 108 quadrilatères et
 214 triangles. Les arêtes posées sur $\partial\beta$ sont tracées courbes.
 
@@ -272,6 +272,176 @@ construit une numérotation globale unique de la façon suivante :
         relie deux points non voisins de $\partial\beta$ est une corde : elle
         traverse $D$ et son milieu reste un nœud intérieur.
 \end{enumerate}
+
+\subsection{Cas d'un obstacle polygonal}
+\label{sec:polygone}
+
+On considère maintenant un obstacle $\beta$ polygonal. Le reste de la
+méthode (grille, zone $\mathcal{Q}$, triangulation de $\mathcal{T}$ par
+\texttt{gmsh}, numérotation) est inchangé ; seules la description de
+$\beta$, la discrétisation de son bord et le traitement des nœuds milieux
+changent.
+
+\paragraph{Définition.} On se donne $m$ sommets $P_1, \dots, P_m$, numérotés
+dans le sens trigonométrique, et on pose $P_{m+1} = P_1$. Le polygone doit
+être simple (ses côtés ne se coupent pas), mais il n'a pas besoin d'être
+convexe ni étoilé. Le côté $j$ est le segment $[P_j, P_{j+1}]$, de longueur
+$\ell_j = |P_{j+1} - P_j|$. On paramètre $\partial\beta$ par l'abscisse
+curviligne : avec $s_1 = 0$, $s_{j+1} = s_j + \ell_j$ et
+$L = s_{m+1}$ le périmètre,
+\[
+\gamma(s) = P_j + \frac{s - s_j}{\ell_j}\,(P_{j+1} - P_j)
+\qquad \text{pour } s \in [s_j, s_{j+1}] .
+\]
+$\gamma$ est continue mais seulement affine par morceaux : elle n'est pas
+dérivable aux sommets $P_j$.
+
+\begin{center}
+\begin{tikzpicture}[scale=1.6]
+  % Obstacle carré
+  \fill[gray!20] (0,0) rectangle (2,2);
+  \draw[thick] (0,0) -- (2,0) -- (2,2) -- (0,2) -- cycle;
+  \node at (1,1) {$\beta$};
+  % Points de discrétisation (sommets inclus)
+  \foreach \t in {0,0.5,1,1.5} {
+    \fill (\t,0) circle (1pt);
+    \fill (2,\t) circle (1pt);
+    \fill (2-\t,2) circle (1pt);
+    \fill (0,2-\t) circle (1pt);
+  }
+  \node[below left]  at (0,0) {$P_1$};
+  \node[below right] at (2,0) {$P_2$};
+  \node[below left]  at (2,2) {$P_3$};
+  \node[above left]  at (0,2) {$P_4$};
+  % Angle rentrant vu depuis D
+  \draw[->] (2,1.65) arc (-90:180:0.35);
+  \node at (2.75,2.45) {$\omega = \tfrac{3\pi}{2}$};
+  \node at (3.2,1) {$D$};
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Opérations géométriques.} Elles remplacent celles de la
+section~\ref{sec:beta} :
+\begin{itemize}
+  \item \textbf{test d'appartenance} : méthode du lancer de rayon. On compte
+        le nombre de côtés coupés par la demi-droite horizontale issue de
+        $x$ ; $x \in \beta$ si ce nombre est impair
+        (\texttt{matplotlib.path.Path.contains\_points}) ;
+  \item \textbf{distance} $d(x,\beta)$ : elle est maintenant exacte, sans
+        échantillonnage. Pour chaque côté,
+        \[
+        d\big(x, [P_j, P_{j+1}]\big) = \big|x - P_j - \tau_j (P_{j+1} - P_j)\big|,
+        \qquad
+        \tau_j = \min\!\left(1, \max\!\left(0,
+        \frac{(x - P_j)\cdot(P_{j+1} - P_j)}{\ell_j^2}\right)\right),
+        \]
+        puis $d(x,\beta) = \min_j d\big(x, [P_j, P_{j+1}]\big)$, mise à zéro si
+        $x \in \beta$.
+\end{itemize}
+
+\paragraph{Discrétisation du bord.} On ne répartit plus les points
+uniformément sur tout le périmètre : les sommets $P_j$ doivent être des
+points de discrétisation, sinon le maillage \og couperait \fg{} les coins de
+$\beta$. On découpe donc chaque côté séparément en
+$n_j = \lceil \ell_j / h_\beta \rceil$ segments égaux :
+\[
+x_{j,i} = P_j + \frac{i}{n_j}\,(P_{j+1} - P_j),
+\qquad 0 \le i < n_j .
+\]
+La liste de tous les $x_{j,i}$, dans l'ordre des côtés, donne les
+$n_\beta = \sum_j n_j$ points de $\partial\beta$, que l'on transmet à
+\texttt{gmsh} comme dans le cas courbe.
+
+\paragraph{Éléments.} Chaque arête posée sur $\partial\beta$ relie deux
+points consécutifs d'un même côté : elle est contenue dans $\partial\beta$.
+Son nœud milieu est donc simplement le milieu du segment, et l'étape 5 de la
+section~\ref{sec:construction} (placement sur $\gamma$) n'est plus
+nécessaire. Tous les triangles sont à côtés droits : $\Phi_T$ est affine,
+$|\det D\Phi_T| = 2|T|$ est constant, et la quadrature à 6 points calcule
+$R^K$ et $M^K$ exactement. Le domaine maillé $D_h$ coïncide exactement avec
+$D$ : il n'y a plus d'erreur géométrique et $V_h \subset H^1_0(D)$.
+
+\paragraph{Exemple.} La figure ci-dessous est produite par
+\texttt{code/main.py} avec les mêmes paramètres que pour la cacahuète
+($\Omega = [0,7] \times [0,5]$, $h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$),
+pour un obstacle en forme de L de sommets
+\[
+(2, 1.5),\ (5, 1.5),\ (5, 2.5),\ (3, 2.5),\ (3, 3.5),\ (2, 3.5).
+\]
+Ce polygone n'est pas convexe : il possède cinq coins saillants
+($\alpha_j = \pi/2$, donc $\omega_j = 3\pi/2$ pour $D$) et un coin rentrant
+en $(3, 2.5)$ ($\alpha_j = 3\pi/2$). Le maillage compte 68 quadrilatères et
+435 triangles, sans raffinement aux coins. Les sommets du polygone sont bien
+des nœuds du maillage, et toutes les arêtes posées sur $\partial\beta$ sont
+droites.
+
+\begin{center}
+\includegraphics[width=0.85\textwidth]{code/resultats/maillage_polygone.png}
+\end{center}
+
+\paragraph{Singularités aux coins.} Un sommet $P_j$ où l'angle intérieur de
+$\beta$ vaut $\alpha_j < \pi$ (coin saillant de $\beta$) est un coin
+\emph{rentrant} pour $D$, d'angle $\omega_j = 2\pi - \alpha_j > \pi$. En
+coordonnées polaires $(r, \theta)$ centrées en $P_j$, la solution se comporte
+près de ce coin comme
+\[
+u(r, \theta) \sim C\, r^{\lambda_j} \sin(\lambda_j \theta),
+\qquad \lambda_j = \frac{\pi}{\omega_j} < 1,
+\]
+dont le gradient est infini en $r = 0$. On a seulement
+$u \in H^{1 + \lambda - \varepsilon}(D)$ pour tout $\varepsilon > 0$, avec
+$\lambda = \min_j \lambda_j$. Sur un maillage à raffinement uniforme,
+l'ordre $2$ des éléments finis ne sert plus à rien près du coin et on
+observe
+\[
+\|u - u_h\|_{H^1} = O(h^{\lambda}),
+\qquad
+\|u - u_h\|_{L^2} = O(h^{2\lambda}).
+\]
+Pour un obstacle carré, $\omega = 3\pi/2$ et $\lambda = 2/3$ : on attend
+$O(h^{2/3})$ en norme $H^1$ au lieu de $O(h^2)$. Seuls les sommets où
+$\alpha_j > \pi$ (coins rentrants de $\beta$, donc saillants pour $D$) ne
+posent pas de problème.
+
+\paragraph{Raffinement aux coins.} Pour retrouver l'ordre optimal, on
+raffine le maillage de façon graduée vers chaque sommet $P_j$ tel que
+$\alpha_j < \pi$. Avec $r(x) = \min_j |x - P_j|$ (minimum pris sur ces
+sommets), on remplace la taille cible par
+\[
+h_{\mathrm{loc}}^{\mathrm{coin}}(x)
+= \max\!\left( h_{\min},\ \min\!\left( h_{\mathrm{loc}}(x),\
+h_\beta \left(\frac{r(x)}{\delta}\right)^{1-\mu} \right) \right),
+\]
+où $h_{\mathrm{loc}}$ est la taille de la section~\ref{sec:construction}.
+Pour des éléments de degré $k = 2$, le paramètre de gradation doit vérifier
+$\mu < \lambda / k$, soit $\mu < 1/3$ pour un carré (on prend par exemple
+$\mu = 1/4$). La taille minimale $h_{\min}$, de l'ordre de $h^{1/\mu}$,
+évite une taille nulle au sommet. Le nombre de mailles reste de l'ordre de
+$h^{-2}$ et on retrouve $O(h^2)$ en norme $H^1$ et $O(h^3)$ en norme $L^2$.
+Il suffit de transmettre $h_{\mathrm{loc}}^{\mathrm{coin}}$ à \texttt{gmsh}
+à la place de $h_{\mathrm{loc}}$ ; le reste du code est inchangé.
+
+\paragraph{Validation.} Pour un obstacle rectangulaire
+$\beta = [x_0, x_1] \times [y_0, y_1]$, on garde la solution manufacturée de
+la section~\ref{sec:validation} en remplaçant $g$ par
+\[
+g(x,y) = X(x)\,Y(y),
+\qquad X = (x - x_0)(x - x_1),
+\qquad Y = (y - y_0)(y - y_1),
+\]
+qui s'annule sur $\partial\beta$ (ainsi que sur les prolongements des côtés,
+ce qui ne gêne pas). On a $\nabla g = \big(X' Y,\ X Y'\big)$ avec
+$X' = 2x - x_0 - x_1$, $Y' = 2y - y_0 - y_1$, et $\Delta g = 2(X + Y)$, d'où
+\[
+f = (1 + a^2 + b^2)\, S\, g - 2\, \nabla S \cdot \nabla g - S\, \Delta g .
+\]
+Cette solution est régulière : elle ne présente pas de singularité aux coins,
+et l'on doit observer les ordres optimaux même sans raffinement aux coins.
+Elle valide donc le code, mais pas le traitement des coins. Pour ce dernier,
+on résout avec $f = 1$ et on compare à une solution de référence calculée sur
+un maillage beaucoup plus fin : l'ordre observé doit passer de
+$\lambda \approx 2/3$ (maillage uniforme) à $2$ (maillage gradué) en norme
+$H^1$.
 
 \section{Discrétisation}
 
@@ -715,7 +885,7 @@ $L_x$, $L_y$     & $7$, $5$     & dimensions de $\Omega$ ($L_x/h$, $L_y/h$ entie
 $h$              & $0.5$        & pas de la grille \\
 $h_\beta$        & $0.15$       & pas sur $\partial\beta$ \\
 $\delta$         & $0.8$        & largeur de la zone de transition \\
-$m_\beta$        & $0.45$       & distance minimale entre $\mathcal{Q}$ et $\beta$ \\
+$m_\beta$        & $0.9$       & distance minimale entre $\mathcal{Q}$ et $\beta$ \\
 disque           & $c = (3.5, 2.5)$, $R = 1$ & obstacle de validation \\
 cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
                  & $\varepsilon = 0.35$ & \\
@@ -745,7 +915,8 @@ Dépendances : \texttt{numpy}, \texttt{scipy}, \texttt{gmsh}, \texttt{matplotlib
 \subsection{Sorties}
 
 \begin{itemize}
-  \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$.
+  \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$
+        (\texttt{maillage\_polygone.png} pour l'obstacle polygonal).
   \item \texttt{solution.png} : $u_h$ en couleurs. Pour l'affichage, chaque
         triangle $P_2$ est découpé en 4 sous-triangles et chaque carré $Q_2$
         en 8 à l'aide des nœuds milieux, puis on trace le résultat avec
