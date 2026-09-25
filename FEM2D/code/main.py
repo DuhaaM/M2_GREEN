@@ -20,7 +20,7 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultats")
 
 # Paramètres par défaut (section 7.1)
 LX, LY = 7.0, 5.0
-H, H_BETA, DELTA, M_BETA = 0.5, 0.15, 0.8, 0.45
+H, H_BETA, DELTA, M_BETA = 0.5, 0.15, 0.8, 1
 DISK = dict(center=(3.5, 2.5), R=1.0)
 PEANUT = dict(center=(3.1, 2.63), r0=0.8, eps=0.35)
 
