@@ -12,7 +12,7 @@ from matplotlib.tri import Triangulation
 import numpy as np
 
 from assembly import compute_errors
-from geometry import Polygon, disk, peanut
+from geometry import Polygon, disk, domain_from_obstacle, peanut
 from mesh import build_mesh
 from solver import solve
 
@@ -25,6 +25,8 @@ DISK = dict(center=(3.5, 2.5), R=1.0)
 PEANUT = dict(center=(3.1, 2.63), r0=0.8, eps=0.35)
 # Obstacle en L (non étoilé, avec un coin rentrant), sommets dans l'ordre du contour
 POLYGON = [(2.0, 1.5), (2.0, 3.5), (3.0, 3.5), (3.0, 2.5), (5.0, 2.5), (5.0, 1.5)]
+# Distance minimale entre beta et le bord de Omega, construit autour du polygone (section 3.5)
+D_MIN = M_BETA + 4*H
 
 
 # ----------------------------------------------------------------------------
@@ -147,9 +149,9 @@ def validation():
     plot_convergence(hs, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
 
 
-def application(name, obstacle, suffix=""):
-    print(f"\n=== Application : {name}, f = 1 ===")
-    mesh = build_mesh(obstacle, LX, LY, H, H_BETA, DELTA, M_BETA)
+def application(name, obstacle, suffix="", Lx=LX, Ly=LY):
+    print(f"\n=== Application : {name}, f = 1, Omega = [0, {Lx}] x [0, {Ly}] ===")
+    mesh = build_mesh(obstacle, Lx, Ly, H, H_BETA, DELTA, M_BETA)
     print(f"{mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, {len(mesh.quad)} quadrilatères, "
           f"{len(mesh.bnd)} nœuds de bord")
     U = solve(mesh, lambda x, y: np.ones_like(x))
@@ -162,5 +164,6 @@ if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     validation()
     application("cacahuète", peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]))
-    application("polygone", Polygon(POLYGON), suffix="_polygone")
+    polygon, Lx, Ly, _ = domain_from_obstacle(Polygon(POLYGON), H, D_MIN, M_BETA)
+    application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly)
     print(f"\nFigures écrites dans {OUT}")

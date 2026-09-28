@@ -102,3 +102,20 @@ class Polygon:
             n = int(np.ceil(L / h_beta))
             t.append(np.linspace(self.t_vertices[k], self.t_vertices[k + 1], n, endpoint=False))
         return np.concatenate(t)
+
+
+def domain_from_obstacle(polygon, h, d_min, m_beta=None):
+    """Omega = [0, Lx] x [0, Ly] aligné sur la grille de pas h, à distance >= d_min de beta.
+
+    La distance d'un segment de beta à un côté de Omega est atteinte en un sommet :
+    il suffit d'imposer la marge d_min autour de la boîte englobante des sommets.
+    beta est centré dans Omega puis translaté pour que Omega commence en (0, 0).
+    Renvoie (polygone translaté, Lx, Ly, décalage appliqué aux sommets).
+    """
+    if m_beta is not None and d_min < m_beta + h:
+        raise ValueError("d_min doit vérifier d_min >= m_beta + h.")
+    lo, hi = polygon.vertices.min(axis=0), polygon.vertices.max(axis=0)
+    n = np.ceil((hi - lo + 2 * d_min) / h - 1e-9).astype(int)
+    origin = 0.5 * (lo + hi) - 0.5 * n * h
+    Lx, Ly = n * h
+    return Polygon(polygon.vertices - origin), Lx, Ly, -origin

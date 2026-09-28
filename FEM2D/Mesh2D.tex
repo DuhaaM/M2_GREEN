@@ -229,9 +229,9 @@ fixés), puis il remplit la zone entre les deux avec des triangles, en suivant
 la taille de maille $h_{\mathrm{loc}}(x)$ définie ci-dessus. La figure
 ci-dessous est produite par \texttt{code/main.py} avec les paramètres par
 défaut de la section~\ref{sec:parametres} ($\Omega = [0,7] \times [0,5]$,
-$h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$, $m_\beta = 0.9$, obstacle en
-forme de cacahuète) ; le maillage compte 108 quadrilatères et
-214 triangles. Les arêtes posées sur $\partial\beta$ sont tracées courbes.
+$h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$, $m_\beta = 1$, obstacle en
+forme de cacahuète) ; le maillage compte 83 quadrilatères et
+296 triangles. Les arêtes posées sur $\partial\beta$ sont tracées courbes.
 
 \begin{center}
 \includegraphics[width=0.85\textwidth]{code/resultats/maillage.png}
@@ -331,7 +331,8 @@ section~\ref{sec:beta} :
         échantillonnage. Pour chaque côté,
         \[
         d\big(x, [P_j, P_{j+1}]\big) = \big|x - P_j - \tau_j (P_{j+1} - P_j)\big|,
-        \qquad
+        \]
+        \[
         \tau_j = \min\!\left(1, \max\!\left(0,
         \frac{(x - P_j)\cdot(P_{j+1} - P_j)}{\ell_j^2}\right)\right),
         \]
@@ -362,16 +363,18 @@ $R^K$ et $M^K$ exactement. Le domaine maillé $D_h$ coïncide exactement avec
 $D$ : il n'y a plus d'erreur géométrique et $V_h \subset H^1_0(D)$.
 
 \paragraph{Exemple.} La figure ci-dessous est produite par
-\texttt{code/main.py} avec les mêmes paramètres que pour la cacahuète
-($\Omega = [0,7] \times [0,5]$, $h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$),
-pour un obstacle en forme de L de sommets
+\texttt{code/main.py} avec $h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$,
+$m_\beta = 1$, pour un obstacle en forme de L de sommets
 \[
 (2, 1.5),\ (5, 1.5),\ (5, 2.5),\ (3, 2.5),\ (3, 3.5),\ (2, 3.5).
 \]
 Ce polygone n'est pas convexe : il possède cinq coins saillants
 ($\alpha_j = \pi/2$, donc $\omega_j = 3\pi/2$ pour $D$) et un coin rentrant
-en $(3, 2.5)$ ($\alpha_j = 3\pi/2$). Le maillage compte 68 quadrilatères et
-435 triangles, sans raffinement aux coins. Les sommets du polygone sont bien
+en $(3, 2.5)$ ($\alpha_j = 3\pi/2$). Le domaine $\Omega$ est construit
+autour de $\beta$ comme à la section~\ref{sec:omega}, avec
+$d_{\min} = m_\beta + h = 1.5$ : on obtient $\Omega = [0,6] \times [0,5]$,
+l'obstacle étant translaté de $(-0.5, 0)$. Le maillage compte 48
+quadrilatères et 437 triangles, sans raffinement aux coins. Les sommets du polygone sont bien
 des nœuds du maillage, et toutes les arêtes posées sur $\partial\beta$ sont
 droites.
 
@@ -442,6 +445,73 @@ on résout avec $f = 1$ et on compare à une solution de référence calculée s
 un maillage beaucoup plus fin : l'ordre observé doit passer de
 $\lambda \approx 2/3$ (maillage uniforme) à $2$ (maillage gradué) en norme
 $H^1$.
+
+\subsection{Construction de $\Omega$ à partir d'un obstacle polygonal}
+\label{sec:omega}
+
+Plutôt que de fixer $\Omega$ à l'avance, on peut le construire autour de
+$\beta$ en imposant une distance minimale $d_{\min}$ entre chaque côté de
+$\beta$ et $\partial\Omega$.
+
+\paragraph{Réduction à la boîte englobante.} $\Omega$ est un rectangle
+aligné sur les axes, contenant $\beta$. La distance d'un segment
+$[P_j, P_{j+1}]$ à la droite $x = X_0$ est une fonction affine le long du
+segment : elle est atteinte en l'une de ses extrémités. Il en est de même pour
+les trois autres côtés de $\Omega$, donc
+\[
+\min_j d\big([P_j, P_{j+1}], \partial\Omega\big)
+= \min\big(x_{\min} - X_0,\ X_1 - x_{\max},\ y_{\min} - Y_0,\ Y_1 - y_{\max}\big),
+\]
+où $x_{\min} = \min_j x_{P_j}$, $x_{\max} = \max_j x_{P_j}$ (de même en $y$) et
+$\Omega = [X_0, X_1] \times [Y_0, Y_1]$. Imposer la distance $d_{\min}$ à
+chaque segment revient donc à imposer une marge $d_{\min}$ autour de la boîte
+englobante $[x_{\min}, x_{\max}] \times [y_{\min}, y_{\max}]$ des sommets.
+
+\paragraph{Alignement sur la grille.} Les dimensions de $\Omega$ doivent être
+des multiples de $h$. On prend
+\[
+n_x = \left\lceil \frac{x_{\max} - x_{\min} + 2 d_{\min}}{h} \right\rceil,
+\qquad
+n_y = \left\lceil \frac{y_{\max} - y_{\min} + 2 d_{\min}}{h} \right\rceil,
+\]
+$L_x = n_x h$, $L_y = n_y h$, et on centre $\beta$ :
+\[
+X_0 = \frac{x_{\min} + x_{\max}}{2} - \frac{L_x}{2},
+\qquad
+Y_0 = \frac{y_{\min} + y_{\max}}{2} - \frac{L_y}{2}.
+\]
+La marge obtenue de chaque côté est au moins $d_{\min}$. Pour se ramener à
+$\Omega = [0, L_x] \times [0, L_y]$, on translate les sommets de $\beta$ de
+$-(X_0, Y_0)$ ; le reste du code est inchangé.
+
+\paragraph{Choix de $d_{\min}$.} Le contour intérieur de $\mathcal{Q}$ ne
+doit pas toucher $\partial\Omega$ (section~\ref{sec:construction}). Une
+cellule le long de $\partial\Omega$, par exemple $[X_0, X_0 + h] \times
+[y, y + h]$, est à distance au moins $d_{\min} - h$ de $\beta$ : elle est
+gardée dans $\mathcal{Q}$ dès que
+\[
+d_{\min} \ge m_\beta + h .
+\]
+Toute la rangée de cellules le long de $\partial\Omega$ est alors dans
+$\mathcal{Q}$ et sépare $\partial\Omega$ du contour autour de $\beta$.
+
+\paragraph{Étude de convergence.} $\Omega$ ne doit pas dépendre de $h$, sinon
+on ne compare pas les solutions d'un même problème. On construit $\Omega$ une
+seule fois, avec le pas le plus grossier $h_{\max}$ et
+$d_{\min} \ge m_\beta + h_{\max}$ ; comme les pas suivants sont
+$h_{\max}/2^k$, $L_x$ et $L_y$ restent des multiples de chacun d'eux.
+
+\paragraph{Remarque.} $\Omega$ est ici un domaine artificiel : la condition
+$u = 0$ sur $\partial\Omega$ n'a de sens que si elle est imposée par le
+problème à cette distance, ou si l'on approche un problème posé sur un
+domaine non borné, auquel cas $d_{\min}$ doit être grand devant la taille de
+$\beta$.
+
+En Python, la fonction de \texttt{geometry.py}
+\[
+\texttt{domain\_from\_obstacle(polygon, h, d\_min, m\_beta)}
+\]
+renvoie le polygone translaté, $L_x$, $L_y$ et la translation appliquée.
 
 \section{Discrétisation}
 
@@ -885,7 +955,7 @@ $L_x$, $L_y$     & $7$, $5$     & dimensions de $\Omega$ ($L_x/h$, $L_y/h$ entie
 $h$              & $0.5$        & pas de la grille \\
 $h_\beta$        & $0.15$       & pas sur $\partial\beta$ \\
 $\delta$         & $0.8$        & largeur de la zone de transition \\
-$m_\beta$        & $0.9$       & distance minimale entre $\mathcal{Q}$ et $\beta$ \\
+$m_\beta$        & $1$         & distance minimale entre $\mathcal{Q}$ et $\beta$ \\
 disque           & $c = (3.5, 2.5)$, $R = 1$ & obstacle de validation \\
 cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
                  & $\varepsilon = 0.35$ & \\
