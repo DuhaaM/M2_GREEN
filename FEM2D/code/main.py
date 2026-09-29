@@ -12,7 +12,7 @@ from matplotlib.tri import Triangulation
 import numpy as np
 
 from assembly import compute_errors
-from geometry import Polygon, disk, domain_from_obstacle, peanut
+from geometry import Polygon, disk, domain_from_obstacle, from_step, peanut
 from mesh import build_mesh
 from solver import solve
 
@@ -25,6 +25,9 @@ DISK = dict(center=(3.5, 2.5), R=1.0)
 PEANUT = dict(center=(3.1, 2.63), r0=0.8, eps=0.35)
 # Obstacle en L (non étoilé, avec un coin rentrant), sommets dans l'ordre du contour
 POLYGON = [(2.0, 1.5), (2.0, 3.5), (3.0, 3.5), (3.0, 2.5), (5.0, 2.5), (5.0, 1.5)]
+# Obstacle importé d'un fichier CAO (généré par cao/make_obstacle.py)
+STEP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "obstacle.step")
+PUZZLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "Puzzle.step")
 # Distance minimale entre beta et le bord de Omega, construit autour du polygone (section 3.5)
 D_MIN = M_BETA + 4*H
 
@@ -166,4 +169,8 @@ if __name__ == "__main__":
     application("cacahuète", peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]))
     polygon, Lx, Ly, _ = domain_from_obstacle(Polygon(POLYGON), H, D_MIN, M_BETA)
     application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly)
+    step, Lx, Ly, _ = domain_from_obstacle(from_step(STEP), H, D_MIN, M_BETA)
+    application("fichier STEP", step, suffix="_step", Lx=Lx, Ly=Ly)
+    puzzle, Lx, Ly, _ = domain_from_obstacle(from_step(PUZZLE), H, D_MIN, M_BETA)
+    application("pièce de puzzle (Puzzle.step)", puzzle, suffix="_puzzle", Lx=Lx, Ly=Ly)
     print(f"\nFigures écrites dans {OUT}")

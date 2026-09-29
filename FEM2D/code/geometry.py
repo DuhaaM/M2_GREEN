@@ -104,18 +104,143 @@ class Polygon:
         return np.concatenate(t)
 
 
-def domain_from_obstacle(polygon, h, d_min, m_beta=None):
+class CurveObstacle:
+    """Obstacle dont le bord est une suite fermée de courbes (importée d'un fichier CAO).
+
+    Chaque courbe est échantillonnée finement ; gamma est paramétré par l'abscisse
+    curviligne ramenée à [0, 2pi) et interpolé linéairement entre les échantillons
+    (erreur géométrique ~ kappa ds^2 / 8, négligeable devant h_beta). Les extrémités
+    des courbes (coins éventuels) sont toujours des nœuds de dbeta.
+    """
+
+    def __init__(self, curves):
+        # curves : liste de tableaux (n_k, 2), orientés et enchaînés (fin de k = début de k+1)
+        self.curves = curves
+        pts = np.vstack([c[:-1] for c in curves])
+        self.vertices = pts  # échantillons de gamma (sans répéter le premier)
+        closed = np.vstack((pts, pts[:1]))
+        s = np.concatenate(([0.0], np.cumsum(np.linalg.norm(np.diff(closed, axis=0), axis=1))))
+        self.t_fine = 2 * np.pi * s / s[-1]  # paramètre des échantillons, dernier = 2pi
+        self.closed = closed
+        n_pts = np.cumsum([0] + [len(c) - 1 for c in curves])
+        self.t_corners = self.t_fine[n_pts]  # début de chaque courbe, puis 2pi
+        self.lengths = np.diff(s[n_pts])
+        self.path = Path(closed, closed=True)
+        self.tree = cKDTree(pts)
+
+    def gamma(self, t):
+        t = np.mod(np.asarray(t, dtype=float), 2 * np.pi)
+        return np.column_stack((np.interp(t, self.t_fine, self.closed[:, 0]),
+                                np.interp(t, self.t_fine, self.closed[:, 1])))
+
+    def inside(self, pts):
+        return self.path.contains_points(pts)
+
+    def distance(self, pts):
+        """d(x, beta), nulle dans beta (distance aux échantillons de gamma)."""
+        d, _ = self.tree.query(pts)
+        d[self.inside(pts)] = 0.0
+        return d
+
+    def boundary_params(self, h_beta):
+        """Paramètres t_i : chaque courbe est découpée séparément, ses extrémités sont des nœuds."""
+        t = []
+        for k, L in enumerate(self.lengths):
+            n = int(np.ceil(L / h_beta))
+            t.append(np.linspace(self.t_corners[k], self.t_corners[k + 1], n, endpoint=False))
+        return np.concatenate(t)
+
+    def translated(self, shift):
+        return CurveObstacle([c + shift for c in self.curves])
+
+
+def from_step(path, scale=1.0, n_samples=4000):
+    """Obstacle beta lu dans un fichier STEP (ou IGES, BREP) via gmsh / OpenCASCADE.
+
+    Le fichier doit décrire une géométrie plane contenue dans un plan z = cte :
+    une face (son bord extérieur est utilisé) ou un contour fermé de courbes.
+    Le bord doit former une seule courbe fermée (pas de trou, un seul obstacle).
+    scale : facteur appliqué aux coordonnées (OpenCASCADE convertit en mm par défaut,
+    scale=1e-3 ramène alors en mètres).
+    """
+    import gmsh  # import local : gmsh n'est nécessaire que pour lire un fichier CAO
+
+    gmsh.initialize()
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("beta")
+        gmsh.model.occ.importShapes(path)
+        gmsh.model.occ.synchronize()
+
+        if gmsh.model.getEntities(3):
+            raise ValueError("Le fichier contient un volume : exporter une face ou un contour plan.")
+        faces = gmsh.model.getEntities(2)
+        if faces:
+            bnd = gmsh.model.getBoundary(faces, combined=True, oriented=False)
+            tags = [abs(t) for _, t in bnd]
+        else:
+            tags = [t for _, t in gmsh.model.getEntities(1)]
+        if not tags:
+            raise ValueError(f"Aucune courbe trouvée dans {path}.")
+
+        def sample(tag, n):
+            lo, hi = gmsh.model.getParametrizationBounds(1, tag)
+            u = np.linspace(lo[0], hi[0], n + 1)
+            return np.asarray(gmsh.model.getValue(1, tag, u)).reshape(-1, 3)
+
+        # Premier passage grossier pour répartir les échantillons selon la longueur
+        rough = {t: sample(t, 200) for t in tags}
+        lengths = {t: np.linalg.norm(np.diff(p, axis=0), axis=1).sum() for t, p in rough.items()}
+        total = sum(lengths.values())
+        curves = [sample(t, max(50, int(np.ceil(n_samples * L / total))))
+                  for t, L in lengths.items() if L > 1e-12 * total]
+    finally:
+        gmsh.finalize()
+
+    z = np.concatenate([c[:, 2] for c in curves])
+    if np.ptp(z) > 1e-8 * total:
+        raise ValueError("La géométrie n'est pas contenue dans un plan z = cte.")
+    curves = [scale * c[:, :2] for c in curves]
+    return CurveObstacle(_chain(curves, 1e-6 * scale * total))
+
+
+def _chain(curves, tol):
+    """Ordonne et oriente les courbes pour former un unique contour fermé."""
+    remaining = list(curves[1:])
+    loop = [curves[0]]
+    while not np.linalg.norm(loop[-1][-1] - loop[0][0]) < tol:
+        end = loop[-1][-1]
+        for k, c in enumerate(remaining):
+            if np.linalg.norm(c[0] - end) < tol:
+                loop.append(remaining.pop(k))
+                break
+            if np.linalg.norm(c[-1] - end) < tol:
+                loop.append(remaining.pop(k)[::-1])
+                break
+        else:
+            raise ValueError("Les courbes du fichier ne forment pas un contour fermé.")
+    if remaining:
+        raise ValueError("Le fichier contient plusieurs contours fermés (trou ou plusieurs obstacles).")
+    for k in range(len(loop)):  # recolle exactement les extrémités
+        loop[k][-1] = loop[(k + 1) % len(loop)][0]
+    return loop
+
+
+def domain_from_obstacle(obstacle, h, d_min, m_beta=None):
     """Omega = [0, Lx] x [0, Ly] aligné sur la grille de pas h, à distance >= d_min de beta.
 
     La distance d'un segment de beta à un côté de Omega est atteinte en un sommet :
-    il suffit d'imposer la marge d_min autour de la boîte englobante des sommets.
+    il suffit d'imposer la marge d_min autour de la boîte englobante des sommets
+    (sommets du polygone, ou échantillons de gamma pour un CurveObstacle).
     beta est centré dans Omega puis translaté pour que Omega commence en (0, 0).
-    Renvoie (polygone translaté, Lx, Ly, décalage appliqué aux sommets).
+    Renvoie (obstacle translaté, Lx, Ly, décalage appliqué aux sommets).
     """
     if m_beta is not None and d_min < m_beta + h:
         raise ValueError("d_min doit vérifier d_min >= m_beta + h.")
-    lo, hi = polygon.vertices.min(axis=0), polygon.vertices.max(axis=0)
+    lo, hi = obstacle.vertices.min(axis=0), obstacle.vertices.max(axis=0)
     n = np.ceil((hi - lo + 2 * d_min) / h - 1e-9).astype(int)
     origin = 0.5 * (lo + hi) - 0.5 * n * h
     Lx, Ly = n * h
-    return Polygon(polygon.vertices - origin), Lx, Ly, -origin
+    if isinstance(obstacle, Polygon):
+        return Polygon(obstacle.vertices - origin), Lx, Ly, -origin
+    return obstacle.translated(-origin), Lx, Ly, -origin
