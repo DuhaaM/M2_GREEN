@@ -52,6 +52,9 @@ class Obstacle:
         t_closed = np.append(self.t_fine, 2 * np.pi)
         return np.interp(s_target, s, t_closed)
 
+    def translated(self, shift):
+        return Obstacle(self.c + shift, self.radius, len(self.t_fine))
+
 
 def disk(center, R):
     return Obstacle(center, lambda t: R + 0.0 * np.asarray(t))
@@ -102,6 +105,9 @@ class Polygon:
             n = int(np.ceil(L / h_beta))
             t.append(np.linspace(self.t_vertices[k], self.t_vertices[k + 1], n, endpoint=False))
         return np.concatenate(t)
+
+    def translated(self, shift):
+        return Polygon(self.vertices + shift)
 
 
 class CurveObstacle:
@@ -154,12 +160,45 @@ class CurveObstacle:
         return CurveObstacle([c + shift for c in self.curves])
 
 
+class MultiObstacle:
+    """beta non connexe : réunion de composantes disjointes (Obstacle, Polygon, CurveObstacle).
+
+    build_mesh traite chaque composante comme un trou de la zone T. Les composantes
+    doivent être assez proches pour que la zone T les entoure toutes (un seul trou
+    dans Q), sinon inner_contour échoue.
+    """
+
+    def __init__(self, components):
+        self.components = list(components)
+        # Échantillons de chaque bord : boîte englobante et test d'imbrication
+        samples = [c.gamma(np.linspace(0.0, 2 * np.pi, 400, endpoint=False))
+                   for c in self.components]
+        for i, a in enumerate(self.components):
+            for j, pts in enumerate(samples):
+                if i != j and a.inside(pts).any():
+                    raise ValueError("Deux composantes de beta sont imbriquées ou se chevauchent "
+                                     "(beta troué ?).")
+        self.vertices = np.vstack([getattr(c, "vertices", s)
+                                   for c, s in zip(self.components, samples)])
+
+    def inside(self, pts):
+        return np.any([c.inside(pts) for c in self.components], axis=0)
+
+    def distance(self, pts):
+        """d(x, beta) = min des distances aux composantes."""
+        return np.min([c.distance(pts) for c in self.components], axis=0)
+
+    def translated(self, shift):
+        return MultiObstacle([c.translated(shift) for c in self.components])
+
+
 def from_step(path, scale=1.0, n_samples=4000):
     """Obstacle beta lu dans un fichier STEP (ou IGES, BREP) via gmsh / OpenCASCADE.
 
     Le fichier doit décrire une géométrie plane contenue dans un plan z = cte :
     une face (son bord extérieur est utilisé) ou un contour fermé de courbes.
-    Le bord doit former une seule courbe fermée (pas de trou, un seul obstacle).
+    Chaque composante connexe doit être bordée par une seule courbe fermée (pas de
+    trou) ; plusieurs composantes disjointes donnent un MultiObstacle.
     scale : facteur appliqué aux coordonnées (OpenCASCADE convertit en mm par défaut,
     scale=1e-3 ramène alors en mètres).
     """
@@ -201,29 +240,31 @@ def from_step(path, scale=1.0, n_samples=4000):
     if np.ptp(z) > 1e-8 * total:
         raise ValueError("La géométrie n'est pas contenue dans un plan z = cte.")
     curves = [scale * c[:, :2] for c in curves]
-    return CurveObstacle(_chain(curves, 1e-6 * scale * total))
+    loops = [CurveObstacle(loop) for loop in _chain(curves, 1e-6 * scale * total)]
+    return loops[0] if len(loops) == 1 else MultiObstacle(loops)
 
 
 def _chain(curves, tol):
-    """Ordonne et oriente les courbes pour former un unique contour fermé."""
-    remaining = list(curves[1:])
-    loop = [curves[0]]
-    while not np.linalg.norm(loop[-1][-1] - loop[0][0]) < tol:
-        end = loop[-1][-1]
-        for k, c in enumerate(remaining):
-            if np.linalg.norm(c[0] - end) < tol:
-                loop.append(remaining.pop(k))
-                break
-            if np.linalg.norm(c[-1] - end) < tol:
-                loop.append(remaining.pop(k)[::-1])
-                break
-        else:
-            raise ValueError("Les courbes du fichier ne forment pas un contour fermé.")
-    if remaining:
-        raise ValueError("Le fichier contient plusieurs contours fermés (trou ou plusieurs obstacles).")
-    for k in range(len(loop)):  # recolle exactement les extrémités
-        loop[k][-1] = loop[(k + 1) % len(loop)][0]
-    return loop
+    """Ordonne et oriente les courbes en contours fermés (un par composante connexe)."""
+    remaining = list(curves)
+    loops = []
+    while remaining:
+        loop = [remaining.pop(0)]
+        while not np.linalg.norm(loop[-1][-1] - loop[0][0]) < tol:
+            end = loop[-1][-1]
+            for k, c in enumerate(remaining):
+                if np.linalg.norm(c[0] - end) < tol:
+                    loop.append(remaining.pop(k))
+                    break
+                if np.linalg.norm(c[-1] - end) < tol:
+                    loop.append(remaining.pop(k)[::-1])
+                    break
+            else:
+                raise ValueError("Les courbes du fichier ne forment pas un contour fermé.")
+        for k in range(len(loop)):  # recolle exactement les extrémités
+            loop[k][-1] = loop[(k + 1) % len(loop)][0]
+        loops.append(loop)
+    return loops
 
 
 def domain_from_obstacle(obstacle, h, d_min, m_beta=None):
@@ -231,7 +272,8 @@ def domain_from_obstacle(obstacle, h, d_min, m_beta=None):
 
     La distance d'un segment de beta à un côté de Omega est atteinte en un sommet :
     il suffit d'imposer la marge d_min autour de la boîte englobante des sommets
-    (sommets du polygone, ou échantillons de gamma pour un CurveObstacle).
+    (sommets du polygone, ou échantillons de gamma pour un CurveObstacle ou un
+    MultiObstacle).
     beta est centré dans Omega puis translaté pour que Omega commence en (0, 0).
     Renvoie (obstacle translaté, Lx, Ly, décalage appliqué aux sommets).
     """

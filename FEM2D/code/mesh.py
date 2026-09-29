@@ -15,7 +15,7 @@ class Mesh:
     tri: np.ndarray
     quad: np.ndarray
     bnd: np.ndarray
-    beta_points: np.ndarray  # points de discrétisation de gamma (pour les figures)
+    beta_points: list  # points de discrétisation de gamma, un tableau par composante de beta
 
     @property
     def n_nodes(self):
@@ -87,15 +87,20 @@ def inner_contour(keep):
         loop.append(nxt)
         prev, cur = cur, nxt
     if len(loop) != len(adjacency):
-        raise ValueError("Le trou de Q contient plusieurs contours fermés.")
+        raise ValueError("Le trou de Q contient plusieurs contours fermés "
+                         "(composantes de beta trop éloignées les unes des autres ?).")
     return loop
 
 
 # ----------------------------------------------------------------------------
 # Étapes 3-4 : triangulation de la zone T avec gmsh (éléments d'ordre 1)
 # ----------------------------------------------------------------------------
-def triangulate(contour_xy, beta_xy, h, h_beta, delta):
-    """Renvoie (node_xy, triangles, contour_nodes, beta_nodes) en indices locaux gmsh."""
+def triangulate(contour_xy, betas_xy, h, h_beta, delta):
+    """Renvoie (node_xy, triangles, contour_nodes, beta_nodes) en indices locaux gmsh.
+
+    betas_xy : liste des points de dbeta, un tableau par composante connexe de beta
+    (chacune devient un trou de la zone T). beta_nodes suit la même structure.
+    """
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
@@ -109,10 +114,11 @@ def triangulate(contour_xy, beta_xy, h, h_beta, delta):
             return tags, lines
 
         contour_pts, contour_lines = closed_polygon(contour_xy)
-        beta_pts, beta_lines = closed_polygon(beta_xy)
+        betas = [closed_polygon(xy) for xy in betas_xy]
+        beta_lines = [line for _, lines in betas for line in lines]
         loop_out = geo.addCurveLoop(contour_lines)
-        loop_beta = geo.addCurveLoop(beta_lines)
-        geo.addPlaneSurface([loop_out, loop_beta])
+        loops_beta = [geo.addCurveLoop(lines) for _, lines in betas]
+        geo.addPlaneSurface([loop_out] + loops_beta)
         # Aucun nœud ajouté sur les contours : leurs nœuds sont imposés
         for line in contour_lines + beta_lines:
             geo.mesh.setTransfiniteCurve(line, 2)
@@ -147,7 +153,7 @@ def triangulate(contour_xy, beta_xy, h, h_beta, delta):
             return index[int(tags[0])]
 
         contour_nodes = [point_node(p) for p in contour_pts]
-        beta_nodes = [point_node(p) for p in beta_pts]
+        beta_nodes = [[point_node(p) for p in pts] for pts, _ in betas]
     finally:
         gmsh.finalize()
     return node_xy, triangles, contour_nodes, beta_nodes
@@ -163,13 +169,14 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
 
     keep = select_cells(obstacle, nx, ny, h, m_beta)
     loop = inner_contour(keep)
-    t_beta = obstacle.boundary_params(h_beta)
-    beta_xy = obstacle.gamma(t_beta)
-    n_beta = len(t_beta)
+    # Composantes connexes de beta (une seule pour Obstacle, Polygon, CurveObstacle)
+    comps = getattr(obstacle, "components", [obstacle])
+    t_beta = [c.boundary_params(h_beta) for c in comps]
+    beta_xy = [c.gamma(t) for c, t in zip(comps, t_beta)]
 
     coords = []            # coordonnées de tous les nœuds
     on_beta = []           # nœud situé sur dbeta
-    beta_index = {}        # numéro global -> indice k du point gamma(t_k)
+    beta_index = {}        # numéro global -> (composante c, indice k du point gamma_c(t_k))
 
     def new_node(xy, is_beta=False):
         coords.append(xy)
@@ -191,9 +198,10 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     g2glob = -np.ones(len(node_xy), dtype=int)
     for (i, j), g in zip(loop, contour_nodes):
         g2glob[g] = vid[i, j]
-    for k, g in enumerate(beta_nodes):
-        g2glob[g] = new_node(tuple(beta_xy[k]), is_beta=True)
-        beta_index[g2glob[g]] = k
+    for c, nodes in enumerate(beta_nodes):
+        for k, g in enumerate(nodes):
+            g2glob[g] = new_node(tuple(beta_xy[c][k]), is_beta=True)
+            beta_index[g2glob[g]] = (c, k)
     for g in np.nonzero(g2glob < 0)[0]:
         g2glob[g] = new_node(tuple(node_xy[g]))
     tri3 = g2glob[tri3]
@@ -212,15 +220,16 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
         key = (min(a, b), max(a, b))
         if key in edge_mid:
             return edge_mid[key]
-        if a in beta_index and b in beta_index:
-            ka, kb = beta_index[a], beta_index[b]
+        if a in beta_index and b in beta_index and beta_index[a][0] == beta_index[b][0]:
+            (c, ka), (_, kb) = beta_index[a], beta_index[b]
+            n_beta = len(t_beta[c])
             if (ka - kb) % n_beta == 1:
                 ka, kb = kb, ka
             if (kb - ka) % n_beta == 1:  # arête posée sur dbeta
-                ta, tb = t_beta[ka], t_beta[kb]
+                ta, tb = t_beta[c][ka], t_beta[c][kb]
                 if kb == 0:
                     tb += 2 * np.pi
-                m = new_node(tuple(obstacle.gamma([0.5 * (ta + tb)])[0]), is_beta=True)
+                m = new_node(tuple(comps[c].gamma([0.5 * (ta + tb)])[0]), is_beta=True)
                 edge_mid[key] = m
                 return m
         m = new_node(tuple(0.5 * (np.array(coords[a]) + np.array(coords[b]))))

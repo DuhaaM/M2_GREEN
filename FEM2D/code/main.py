@@ -28,6 +28,8 @@ POLYGON = [(2.0, 1.5), (2.0, 3.5), (3.0, 3.5), (3.0, 2.5), (5.0, 2.5), (5.0, 1.5
 # Obstacle importé d'un fichier CAO (généré par cao/make_obstacle.py)
 STEP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "obstacle.step")
 PUZZLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "Puzzle.step")
+# beta non connexe : deux composantes proches (généré par cao/make_obstacle.py)
+DEUX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "deux_obstacles.step")
 # Distance minimale entre beta et le bord de Omega, construit autour du polygone (section 3.5)
 D_MIN = M_BETA + 4*H
 
@@ -81,9 +83,10 @@ def plot_triangulation(mesh):
 
 
 def draw_beta(ax, mesh):
-    pts = np.vstack((mesh.beta_points, mesh.beta_points[:1]))
-    ax.fill(pts[:, 0], pts[:, 1], color="0.8", zorder=3)
-    ax.plot(pts[:, 0], pts[:, 1], "k", lw=1.2, zorder=4)
+    for xy in mesh.beta_points:
+        pts = np.vstack((xy, xy[:1]))
+        ax.fill(pts[:, 0], pts[:, 1], color="0.8", zorder=3)
+        ax.plot(pts[:, 0], pts[:, 1], "k", lw=1.2, zorder=4)
 
 
 def plot_mesh(mesh, path):
@@ -173,4 +176,6 @@ if __name__ == "__main__":
     application("fichier STEP", step, suffix="_step", Lx=Lx, Ly=Ly)
     puzzle, Lx, Ly, _ = domain_from_obstacle(from_step(PUZZLE), H, D_MIN, M_BETA)
     application("pièce de puzzle (Puzzle.step)", puzzle, suffix="_puzzle", Lx=Lx, Ly=Ly)
+    deux, Lx, Ly, _ = domain_from_obstacle(from_step(DEUX), H, D_MIN, M_BETA)
+    application("beta non connexe (deux_obstacles.step)", deux, suffix="_non_connexe", Lx=Lx, Ly=Ly)
     print(f"\nFigures écrites dans {OUT}")
