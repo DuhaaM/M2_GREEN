@@ -372,9 +372,10 @@ Ce polygone n'est pas convexe : il possède cinq coins saillants
 ($\alpha_j = \pi/2$, donc $\omega_j = 3\pi/2$ pour $D$) et un coin rentrant
 en $(3, 2.5)$ ($\alpha_j = 3\pi/2$). Le domaine $\Omega$ est construit
 autour de $\beta$ comme à la section~\ref{sec:omega}, avec
-$d_{\min} = m_\beta + h = 1.5$ : on obtient $\Omega = [0,6] \times [0,5]$,
-l'obstacle étant translaté de $(-0.5, 0)$. Le maillage compte 48
-quadrilatères et 437 triangles, sans raffinement aux coins. Les sommets du polygone sont bien
+$d_{\min} = m_\beta + 4h = 3$ (qui vérifie bien $d_{\min} \ge m_\beta + h$) :
+on obtient $\Omega = [0,9] \times [0,8]$, l'obstacle étant translaté de
+$(1, 1.5)$. Le maillage compte 216 quadrilatères et 433 triangles, sans
+raffinement aux coins. Les sommets du polygone sont bien
 des nœuds du maillage, et toutes les arêtes posées sur $\partial\beta$ sont
 droites.
 
@@ -509,9 +510,197 @@ $\beta$.
 
 En Python, la fonction de \texttt{geometry.py}
 \[
-\texttt{domain\_from\_obstacle(polygon, h, d\_min, m\_beta)}
+\texttt{domain\_from\_obstacle(obstacle, h, d\_min, m\_beta)}
 \]
-renvoie le polygone translaté, $L_x$, $L_y$ et la translation appliquée.
+renvoie l'obstacle translaté, $L_x$, $L_y$ et la translation appliquée. Elle
+accepte aussi un obstacle importé d'un fichier CAO
+(section~\ref{sec:step}) : les sommets $P_j$ sont alors remplacés par les
+points d'échantillonnage de $\partial\beta$.
+
+\subsection{Obstacle importé d'un fichier CAO (STEP)}
+\label{sec:step}
+
+Plutôt que de décrire $\beta$ par une formule ou par la liste de ses
+sommets, on peut le dessiner dans un logiciel de CAO et l'exporter au format
+STEP (\texttt{.step}), le format d'échange standard des modeleurs
+géométriques. Un tel fichier décrit exactement le bord de $\beta$ comme une
+suite de courbes : segments, arcs de cercle ou d'ellipse, B-splines\dots{} Le
+reste de la méthode (grille, zone $\mathcal{Q}$, triangulation de
+$\mathcal{T}$, numérotation) est inchangé : seule la description de $\beta$
+change, et elle combine le cas courbe (section~\ref{sec:beta}) et le cas
+polygonal (section~\ref{sec:polygone}).
+
+\paragraph{Lecture du fichier.} Le fichier est lu par \texttt{gmsh}, avec le
+noyau géométrique OpenCASCADE. Il doit décrire une géométrie plane, contenue
+dans un plan $z = \text{cte}$ : soit une face, dont on prend le bord, soit
+directement un contour fermé de courbes. Un volume est refusé. On obtient $m$
+courbes $C_1, \dots, C_m$, chacune donnée par un paramétrage
+$u \mapsto C_j(u)$, $u \in [u_j^-, u_j^+]$, que \texttt{gmsh} sait évaluer
+exactement. Les coordonnées sont lues telles qu'elles sont écrites dans le
+fichier ; un facteur d'échelle permet de changer d'unité (les logiciels de CAO
+travaillent souvent en millimètres).
+
+\paragraph{Mise bout à bout des courbes.} Les courbes ne sont pas rangées
+dans l'ordre du contour dans le fichier, et leurs sens de parcours sont
+quelconques. On part de $C_1$, puis on cherche à chaque étape la courbe dont
+une extrémité coïncide (à une tolérance relative $10^{-6}$ près) avec
+l'extrémité finale de la courbe courante, en la retournant si nécessaire,
+jusqu'à revenir au point de départ. On obtient ainsi un contour fermé
+$C_1, \dots, C_m$ où la fin de $C_j$ est le début de $C_{j+1}$.
+
+\paragraph{Paramétrage de $\gamma$.} Le paramètre $u$ fourni par la CAO n'est
+pas l'abscisse curviligne, et il faut évaluer $\gamma$ après la fermeture de
+\texttt{gmsh}, puisque \texttt{gmsh} est de nouveau appelé pour la
+triangulation de $\mathcal{T}$. On échantillonne donc finement chaque courbe
+(environ $4000$ points au total, répartis selon la longueur des courbes), on
+calcule l'abscisse curviligne cumulée $s$ le long du contour, de longueur
+totale $L$, et on pose $t = 2\pi s / L \in [0, 2\pi)$. Entre deux
+échantillons, $\gamma(t)$ est obtenu par interpolation linéaire. Si
+$\Delta s$ est l'écart entre deux échantillons et $\kappa$ la courbure,
+l'écart entre la corde et la courbe est au plus
+\[
+\frac{\kappa\, \Delta s^2}{8},
+\]
+de l'ordre de $10^{-7}$ pour les exemples ci-dessous, très petit devant
+$h_\beta$. On note $t_j$ le paramètre du début de $C_j$ et $\ell_j$ la
+longueur de $C_j$.
+
+\paragraph{Discrétisation du bord et éléments.} Comme pour un polygone, les
+extrémités des courbes (les coins éventuels de $\beta$) doivent être des
+nœuds. On découpe donc chaque courbe séparément en
+$n_j = \lceil \ell_j / h_\beta \rceil$ morceaux de même longueur, soit les
+paramètres
+\[
+t_{j,i} = t_j + \frac{i}{n_j}\,(t_{j+1} - t_j),
+\qquad 0 \le i < n_j .
+\]
+En revanche, contrairement au cas polygonal, les courbes ne sont pas des
+segments : le nœud milieu d'une arête posée sur $\partial\beta$ est placé sur
+la courbe en $\gamma\big(\tfrac{t_a + t_b}{2}\big)$, comme à l'étape 5 de la
+section~\ref{sec:construction}. Les deux extrémités d'une telle arête sont
+sur une même courbe $C_j$, et son milieu aussi.
+
+\paragraph{Opérations géométriques.}
+\begin{itemize}
+  \item \textbf{test d'appartenance} : lancer de rayon sur le polygone formé
+        par les échantillons (\texttt{matplotlib.path.Path.contains\_points}) ;
+  \item \textbf{distance} $d(x, \beta)$ : distance au plus proche
+        échantillon de $\gamma$ (arbre \texttt{scipy.spatial.cKDTree}),
+        mise à zéro si $x \in \beta$ ;
+  \item \textbf{construction de $\Omega$} : celle de la
+        section~\ref{sec:omega}, avec la boîte englobante des échantillons.
+\end{itemize}
+Aux coins de $\beta$, les remarques de la section~\ref{sec:polygone} sur les
+singularités et le raffinement restent valables.
+
+\paragraph{Validation.} On exporte en STEP le disque de validation
+($c = (3.5, 2.5)$, $R = 1$), on le relit avec \texttt{from\_step} et on
+reprend l'étude de convergence de la section~\ref{sec:validation}, avec les
+mêmes paramètres. On retrouve les ordres optimaux, ce qui confirme que les
+nœuds milieux sont bien placés sur la courbe :
+\begin{center}
+\begin{tabular}{ccccc}
+\hline
+$h$ & erreur $L^2$ & ordre & erreur $H^1$ & ordre \\
+\hline
+$0.5$    & $8.95 \cdot 10^{-3}$ & --     & $1.42 \cdot 10^{-1}$ & --     \\
+$0.25$   & $1.25 \cdot 10^{-3}$ & $2.84$ & $3.90 \cdot 10^{-2}$ & $1.87$ \\
+$0.125$  & $1.61 \cdot 10^{-4}$ & $2.96$ & $9.98 \cdot 10^{-3}$ & $1.96$ \\
+$0.0625$ & $2.04 \cdot 10^{-5}$ & $2.98$ & $2.52 \cdot 10^{-3}$ & $1.98$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\paragraph{Exemples.} Les fichiers STEP sont rangés dans \texttt{code/cao/}.
+\texttt{obstacle.step} (rectangle arrondi réuni à un disque, généré par
+\texttt{cao/make\_obstacle.py}) mêle segments, arcs et coins rentrants ;
+\texttt{Puzzle.step}, dessiné en CAO, est une pièce de puzzle bordée de 15
+courbes. Avec les paramètres par défaut et $d_{\min} = m_\beta + 4h = 3$,
+\texttt{code/main.py} donne respectivement $\Omega = [0, 9] \times [0, 8]$
+(214 quadrilatères, 426 triangles) et $\Omega = [0, 9.5] \times [0, 8]$
+(220 quadrilatères, 518 triangles). Les coins sont des nœuds du maillage et
+les arcs sont suivis par des arêtes courbes.
+
+\begin{center}
+\includegraphics[width=0.48\textwidth]{code/resultats/maillage_step.png}
+\hfill
+\includegraphics[width=0.48\textwidth]{code/resultats/maillage_puzzle.png}
+\end{center}
+
+\subsubsection*{Obstacle non connexe}
+
+Le fichier peut contenir plusieurs faces disjointes : $\beta$ est alors la
+réunion de composantes connexes $\beta_1, \dots, \beta_p$, et la mise bout
+à bout des courbes produit un contour fermé par composante. Chaque
+composante est décrite comme ci-dessus, avec son propre paramétrage
+$\gamma_c$, $c = 1, \dots, p$, et
+\[
+d(x, \beta) = \min_{c} d(x, \beta_c),
+\qquad
+x \in \beta \iff \exists\, c,\ x \in \beta_c .
+\]
+La construction du maillage change en deux points :
+\begin{itemize}
+  \item \textbf{Triangulation.} La zone $\mathcal{T}$ est limitée à
+        l'extérieur par le contour intérieur de $\mathcal{Q}$ et possède un
+        trou par composante : on transmet à \texttt{gmsh} les $p$ contours
+        $\partial\beta_c$.
+  \item \textbf{Numérotation.} Un point de $\partial\beta$ est repéré par le
+        couple $(c, k)$ : composante et indice dans la discrétisation de
+        $\gamma_c$. Une arête est posée sur $\partial\beta$ si ses deux
+        sommets appartiennent à la \emph{même} composante et sont consécutifs
+        dans sa discrétisation ; son milieu est alors placé sur $\gamma_c$.
+        Une arête qui relie deux composantes traverse $D$ : son milieu est un
+        nœud intérieur.
+\end{itemize}
+Pour $p = 1$, on retrouve exactement le cas précédent.
+
+\paragraph{Limites.} Les composantes doivent être \emph{proches} : la
+méthode suppose toujours que $\mathcal{Q}$ n'a qu'un seul contour intérieur,
+donc que la zone $\mathcal{T}$ entoure toutes les composantes à la fois. Une
+cellule située entre deux composantes n'est gardée que si elle est à
+distance au moins $m_\beta$ de chacune, ce qui est impossible si leur écart
+est inférieur à $2 m_\beta$ environ. Si les composantes sont plus éloignées,
+des quadrilatères passent entre elles, $\mathcal{Q}$ a plusieurs trous et le
+code s'arrête avec un message d'erreur. Sont également refusés un $\beta$
+troué (une composante contient une autre) et deux faces qui se chevauchent.
+
+\paragraph{Validation et exemple.} Pour deux disques
+$\beta_c = D(c_c, R_c)$, avec $c_1 = (2.5, 2.5)$, $R_1 = 0.7$,
+$c_2 = (4.6, 2.5)$, $R_2 = 0.6$, on prend la solution manufacturée
+$u = S\, g_1 g_2$, où $g_c(x) = |x - c_c|^2 - R_c^2$, qui s'annule sur les
+deux bords, et $f = -\Delta u + u$. L'écart entre les disques vaut $0.8$ :
+on fixe $m_\beta = 0.45$ pour tous les pas afin qu'ils restent proches (avec
+$m_\beta = 0.9\,h$, des quadrilatères passent entre eux dès $h = 0.25$). On
+obtient encore les ordres optimaux :
+\begin{center}
+\begin{tabular}{ccccc}
+\hline
+$h$ & erreur $L^2$ & ordre & erreur $H^1$ & ordre \\
+\hline
+$0.5$    & $2.42 \cdot 10^{-1}$ & --     & $3.80$               & --     \\
+$0.25$   & $3.11 \cdot 10^{-2}$ & $2.96$ & $9.66 \cdot 10^{-1}$ & $1.98$ \\
+$0.125$  & $3.90 \cdot 10^{-3}$ & $2.99$ & $2.42 \cdot 10^{-1}$ & $2.00$ \\
+$0.0625$ & $4.88 \cdot 10^{-4}$ & $3.00$ & $6.05 \cdot 10^{-2}$ & $2.00$ \\
+\hline
+\end{tabular}
+\end{center}
+Le fichier \texttt{cao/deux\_obstacles.step} (une ellipse et un rectangle
+arrondi) donne, avec les paramètres par défaut,
+$\Omega = [0, 9.5] \times [0, 7.5]$, 212 quadrilatères et 436 triangles :
+
+\begin{center}
+\includegraphics[width=0.7\textwidth]{code/resultats/maillage_non_connexe.png}
+\end{center}
+
+En Python, \texttt{from\_step(path, scale)} de \texttt{geometry.py} renvoie
+un objet \texttt{CurveObstacle} (une composante) ou \texttt{MultiObstacle}
+(plusieurs composantes), qui se passe directement à
+\texttt{domain\_from\_obstacle} puis à \texttt{build\_mesh}. Pour produire un
+fichier STEP depuis Python, on construit la géométrie avec
+\texttt{gmsh.model.occ} (\texttt{addDisk}, \texttt{addRectangle},
+\texttt{addBSpline}, opérations booléennes\dots) puis on l'écrit avec
+\texttt{gmsh.write("obstacle.step")}.
 
 \section{Discrétisation}
 
@@ -939,7 +1128,10 @@ dans les fonctions de base, la numérotation locale ou l'assemblage.
 
 Une fois le code validé, on le lance sur l'obstacle en forme de cacahuète
 avec $f = 1$. Il n'y a pas de solution exacte : on vérifie seulement que
-$u_h$ est positive, nulle sur $\partial D$ et régulière.
+$u_h$ est positive, nulle sur $\partial D$ et régulière. On fait de même pour
+l'obstacle polygonal (section~\ref{sec:polygone}) et pour les obstacles lus
+dans les fichiers STEP de \texttt{code/cao/} (section~\ref{sec:step}), y
+compris l'obstacle non connexe.
 
 \section{Paramètres et sorties attendues}
 
@@ -970,12 +1162,14 @@ cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
 \hline
 Module & Contenu \\
 \hline
-\texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, $g_\beta$ \\
+\texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, $g_\beta$, \\
+                      & polygone, lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
 \texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
 \texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$, $R^K$, $M^K$, $F^K$, assemblage creux \\
 \texttt{solver.py}    & élimination des nœuds de $\mathcal{B}$, résolution \\
 \texttt{main.py}      & cas de validation, étude de convergence, figures \\
+\texttt{cao/}         & fichiers STEP d'exemple et script \texttt{make\_obstacle.py} \\
 \hline
 \end{tabular}
 \end{center}
@@ -986,7 +1180,10 @@ Dépendances : \texttt{numpy}, \texttt{scipy}, \texttt{gmsh}, \texttt{matplotlib
 
 \begin{itemize}
   \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$
-        (\texttt{maillage\_polygone.png} pour l'obstacle polygonal).
+        (\texttt{maillage\_polygone.png} pour l'obstacle polygonal,
+        \texttt{maillage\_step.png}, \texttt{maillage\_puzzle.png} et
+        \texttt{maillage\_non\_connexe.png} pour les obstacles STEP ; de même
+        pour \texttt{solution*.png}).
   \item \texttt{solution.png} : $u_h$ en couleurs. Pour l'affichage, chaque
         triangle $P_2$ est découpé en 4 sous-triangles et chaque carré $Q_2$
         en 8 à l'aide des nœuds milieux, puis on trace le résultat avec
