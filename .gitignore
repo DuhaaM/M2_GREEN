@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# LaTeX (fichiers auxiliaires de compilation)
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
