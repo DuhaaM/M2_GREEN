@@ -4,10 +4,12 @@ Sections 6 et 7 de main.tex. Lancer :  python3 main.py
 Les figures sont écrites dans le dossier resultats/ à côté de ce fichier.
 """
 import os
+from concurrent.futures import ProcessPoolExecutor
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 from matplotlib.tri import Triangulation
 import numpy as np
 
@@ -107,11 +109,10 @@ def draw_beta(ax, mesh):
 def plot_mesh(mesh, path):
     fig, ax = plt.subplots(figsize=(8, 6))
     P = mesh.coords
-    for v in mesh.quad[:, [0, 1, 2, 3, 0]]:
-        ax.plot(P[v, 0], P[v, 1], color="0.55", lw=0.6)
+    ax.add_collection(LineCollection(P[mesh.quad[:, [0, 1, 2, 3, 0]]], colors="0.55", lw=0.6))
     # Triangles tracés avec leurs milieux : les arêtes posées sur beta apparaissent courbes
-    for v in mesh.tri[:, [0, 3, 1, 4, 2, 5, 0]]:
-        ax.plot(P[v, 0], P[v, 1], color="tab:blue", lw=0.6)
+    ax.add_collection(LineCollection(P[mesh.tri[:, [0, 3, 1, 4, 2, 5, 0]]], colors="tab:blue", lw=0.6))
+    ax.autoscale_view()
     draw_beta(ax, mesh)
     ax.set_aspect("equal")
     ax.set_title(f"Maillage : {len(mesh.quad)} quadrilatères Q2, {len(mesh.tri)} triangles P2")
@@ -148,54 +149,83 @@ def plot_convergence(hs, e_l2, e_h1, path):
 # ----------------------------------------------------------------------------
 # Programme principal
 # ----------------------------------------------------------------------------
-def validation():
-    print("=== Validation : disque, solution manufacturée ===")
+# Chaque cas tourne dans son propre processus : les fonctions ci-dessous sont définies
+# au niveau du module (les lambda ne passent pas d'un processus à l'autre) et renvoient
+# leur texte au lieu de l'afficher, pour que les sorties ne s'entremêlent pas.
+HS = [0.5, 0.25, 0.125, 0.0625]
+
+
+def validation_step(k, h):
+    """Un pas h de l'étude de convergence : (nombre de nœuds, erreur L2, erreur H1)."""
     obstacle = disk(DISK["center"], DISK["R"])
     u_ex, grad_u_ex, f = manufactured(*DISK["center"], DISK["R"], G_BETA["G"], G_BETA["grad"], G_BETA["lap"])
-    hs = [0.5, 0.25, 0.125, 0.0625]
+    mesh = build_mesh(obstacle, LX, LY, h, 0.3 * h, 1.6 * h, 0.9 * h)
+    U = solve(mesh, f, g_beta=u_ex)
+    l2, h1 = compute_errors(mesh, U, u_ex, grad_u_ex)
+    if k == 0:
+        plot_solution(mesh, U, os.path.join(OUT, "validation_solution.png"),
+                      f"Validation : $u_h$ pour $h = {h}$")
+    return mesh.n_nodes, l2, h1
+
+
+def validation_report(results):
+    print("=== Validation : disque, solution manufacturée ===")
     e_l2, e_h1 = [], []
     print(f"{'h':>8} {'nœuds':>8} {'erreur L2':>12} {'ordre':>6} {'erreur H1':>12} {'ordre':>6}")
-    for k, h in enumerate(hs):
-        mesh = build_mesh(obstacle, LX, LY, h, 0.3 * h, 1.6 * h, 0.9 * h)
-        U = solve(mesh, f, g_beta=u_ex)
-        l2, h1 = compute_errors(mesh, U, u_ex, grad_u_ex)
+    for k, (h, (n_nodes, l2, h1)) in enumerate(zip(HS, results)):
         e_l2.append(l2)
         e_h1.append(h1)
         p_l2 = f"{np.log(e_l2[-2] / l2) / np.log(2):6.2f}" if k else f"{'-':>6}"
         p_h1 = f"{np.log(e_h1[-2] / h1) / np.log(2):6.2f}" if k else f"{'-':>6}"
-        print(f"{h:8.4f} {mesh.n_nodes:8d} {l2:12.4e} {p_l2} {h1:12.4e} {p_h1}")
-        if k == 0:
-            plot_solution(mesh, U, os.path.join(OUT, "validation_solution.png"),
-                          f"Validation : $u_h$ pour $h = {h}$")
-    plot_convergence(hs, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
+        print(f"{h:8.4f} {n_nodes:8d} {l2:12.4e} {p_l2} {h1:12.4e} {p_h1}")
+    plot_convergence(HS, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
 
 
 def application(name, obstacle, suffix="", Lx=LX, Ly=LY, g_beta=None):
-    print(f"\n=== Application : {name}, f = 1, Omega = [0, {Lx}] x [0, {Ly}] ===")
+    out = [f"\n=== Application : {name}, f = 1, Omega = [0, {Lx}] x [0, {Ly}] ==="]
     mesh = build_mesh(obstacle, Lx, Ly, H, H_BETA, DELTA, M_BETA)
-    print(f"{mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, {len(mesh.quad)} quadrilatères, "
-          f"{len(mesh.bnd)} nœuds de bord")
+    out.append(f"{mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, {len(mesh.quad)} quadrilatères, "
+               f"{len(mesh.bnd)} nœuds de bord")
     U = solve(mesh, lambda x, y: np.ones_like(x), g_beta)
-    print(f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}")
+    out.append(f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}")
     plot_mesh(mesh, os.path.join(OUT, f"maillage{suffix}.png"))
     title = "Solution $u_h$ pour $f = 1$" + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else "")
     plot_solution(mesh, U, os.path.join(OUT, f"solution{suffix}.png"), title)
+    return "\n".join(out)
+
+
+def peanut_case(dirichlet=False):
+    cacahuete, Lx, Ly, _ = domain_from_obstacle(peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]),
+                                                H, D_MIN, M_BETA)
+    if dirichlet:
+        return application("cacahuète, u = g_beta = 1 + x/Lx sur dbeta", cacahuete, suffix="_dirichlet",
+                           Lx=Lx, Ly=Ly, g_beta=lambda x, y: 1 + x / Lx)
+    return application("cacahuète", cacahuete, Lx=Lx, Ly=Ly)
+
+
+def polygon_case():
+    polygon, Lx, Ly, _ = domain_from_obstacle(Polygon(POLYGON), H, D_MIN, M_BETA)
+    return application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly,
+                       g_beta=lambda x, y: np.exp(0.1 * (x - y)))
+
+
+def step_case(path, name, suffix):
+    obstacle, Lx, Ly, _ = domain_from_obstacle(from_step(path), H, D_MIN, M_BETA)
+    return application(name, obstacle, suffix=suffix, Lx=Lx, Ly=Ly)
 
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    validation()
-    cacahuete, Lx, Ly, _ = domain_from_obstacle(peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]),
-                                                H, D_MIN, M_BETA)
-    application("cacahuète", cacahuete, Lx=Lx, Ly=Ly)
-    application("cacahuète, u = g_beta = 1 + x/Lx sur dbeta", cacahuete, suffix="_dirichlet", Lx=Lx, Ly=Ly,
-                g_beta=lambda x, y: 1 + x / Lx)
-    polygon, Lx, Ly, _ = domain_from_obstacle(Polygon(POLYGON), H, D_MIN, M_BETA)
-    application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly,g_beta=lambda x,y : np.exp(0.1*(x-y)))
-    step, Lx, Ly, _ = domain_from_obstacle(from_step(STEP), H, D_MIN, M_BETA)
-    application("fichier STEP", step, suffix="_step", Lx=Lx, Ly=Ly)
-    puzzle, Lx, Ly, _ = domain_from_obstacle(from_step(PUZZLE), H, D_MIN, M_BETA)
-    application("pièce de puzzle (Puzzle.step)", puzzle, suffix="_puzzle", Lx=Lx, Ly=Ly)
-    deux, Lx, Ly, _ = domain_from_obstacle(from_step(DEUX), H, D_MIN, M_BETA)
-    application("beta non connexe (deux_obstacles.step)", deux, suffix="_non_connexe", Lx=Lx, Ly=Ly)
+    with ProcessPoolExecutor() as ex:
+        # Le pas h le plus fin est le plus long : lancé en premier
+        val = [ex.submit(validation_step, k, h) for k, h in reversed(list(enumerate(HS)))][::-1]
+        apps = [ex.submit(peanut_case),
+                ex.submit(peanut_case, dirichlet=True),
+                ex.submit(polygon_case),
+                ex.submit(step_case, STEP, "fichier STEP", "_step"),
+                ex.submit(step_case, PUZZLE, "pièce de puzzle (Puzzle.step)", "_puzzle"),
+                ex.submit(step_case, DEUX, "beta non connexe (deux_obstacles.step)", "_non_connexe")]
+        validation_report([fut.result() for fut in val])
+        for fut in apps:
+            print(fut.result())
     print(f"\nFigures écrites dans {OUT}")
