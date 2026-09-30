@@ -22,6 +22,11 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultats")
 LX, LY = 7.0, 5.0
 H, H_BETA, DELTA, M_BETA = 0.5, 0.15, 0.8, 1
 DISK = dict(center=(3.5, 2.5), R=1.0)
+# Validation : u_ex = G S sur dbeta, G donnée avec son gradient et son laplacien
+# (G = 1 : cas historique, G = 0 : condition homogène sur dbeta)
+G_BETA = dict(G=lambda x, y: 1 + 3 * np.cos(x) * np.sin(y),
+              grad=lambda x, y: (-3 * np.sin(x) * np.sin(y), 3 * np.cos(x) * np.cos(y)),
+              lap=lambda x, y: -6 * np.cos(x) * np.sin(y))
 PEANUT = dict(center=(3.1, 2.63), r0=0.8, eps=0.35)
 # Obstacle en L (non étoilé, avec un coin rentrant), sommets dans l'ordre du contour
 POLYGON = [(2.0, 1.5), (2.0, 3.5), (3.0, 3.5), (3.0, 2.5), (5.0, 2.5), (5.0, 1.5)]
@@ -37,30 +42,38 @@ D_MIN = M_BETA + 4*H
 # ----------------------------------------------------------------------------
 # Solution manufacturée (section 6.1)
 # ----------------------------------------------------------------------------
-def manufactured(cx, cy, R):
-    """u_ex = S (phi + 1) : nulle sur dOmega, égale à S sur dbeta (g_beta = u_ex)."""
+def manufactured(cx, cy, R, G, grad_G, lap_G):
+    """u_ex = S (phi + G) : nulle sur dOmega, égale à G S sur dbeta (g_beta = u_ex).
+
+    Avec p = phi + G : -Δu + u = (1 + a² + b²) S p - 2 ∇S.∇p - S Δp, où Δp = 4 + ΔG.
+    """
     a, b = np.pi / LX, np.pi / LY
 
     def S(x, y):
         return np.sin(a * x) * np.sin(b * y)
 
-    def phi(x, y):
-        return (x - cx) ** 2 + (y - cy) ** 2 - R**2
+    def grad_S(x, y):
+        return a * np.cos(a * x) * np.sin(b * y), b * np.sin(a * x) * np.cos(b * y)
+
+    def p(x, y):
+        return (x - cx) ** 2 + (y - cy) ** 2 - R**2 + G(x, y)
+
+    def grad_p(x, y):
+        Gx, Gy = grad_G(x, y)
+        return 2 * (x - cx) + Gx, 2 * (y - cy) + Gy
 
     def u_ex(x, y):
-        return S(x, y) * (phi(x, y) + 1)
+        return S(x, y) * p(x, y)
 
     def grad_u_ex(x, y):
-        Sx = a * np.cos(a * x) * np.sin(b * y)
-        Sy = b * np.sin(a * x) * np.cos(b * y)
-        p1 = phi(x, y) + 1
-        return p1 * Sx + S(x, y) * 2 * (x - cx), p1 * Sy + S(x, y) * 2 * (y - cy)
+        (Sx, Sy), (px, py) = grad_S(x, y), grad_p(x, y)
+        return p(x, y) * Sx + S(x, y) * px, p(x, y) * Sy + S(x, y) * py
 
     def f(x, y):
-        return ((1 + a**2 + b**2) * S(x, y) * (phi(x, y) + 1)
-                - 4 * (a * (x - cx) * np.cos(a * x) * np.sin(b * y)
-                       + b * (y - cy) * np.sin(a * x) * np.cos(b * y))
-                - 4 * S(x, y))
+        (Sx, Sy), (px, py) = grad_S(x, y), grad_p(x, y)
+        return ((1 + a**2 + b**2) * S(x, y) * p(x, y)
+                - 2 * (Sx * px + Sy * py)
+                - S(x, y) * (4 + lap_G(x, y)))
 
     return u_ex, grad_u_ex, f
 
@@ -138,7 +151,7 @@ def plot_convergence(hs, e_l2, e_h1, path):
 def validation():
     print("=== Validation : disque, solution manufacturée ===")
     obstacle = disk(DISK["center"], DISK["R"])
-    u_ex, grad_u_ex, f = manufactured(*DISK["center"], DISK["R"])
+    u_ex, grad_u_ex, f = manufactured(*DISK["center"], DISK["R"], G_BETA["G"], G_BETA["grad"], G_BETA["lap"])
     hs = [0.5, 0.25, 0.125, 0.0625]
     e_l2, e_h1 = [], []
     print(f"{'h':>8} {'nœuds':>8} {'erreur L2':>12} {'ordre':>6} {'erreur H1':>12} {'ordre':>6}")
