@@ -38,24 +38,26 @@ D_MIN = M_BETA + 4*H
 # Solution manufacturée (section 6.1)
 # ----------------------------------------------------------------------------
 def manufactured(cx, cy, R):
+    """u_ex = S (phi + 1) : nulle sur dOmega, égale à S sur dbeta (g_beta = u_ex)."""
     a, b = np.pi / LX, np.pi / LY
 
     def S(x, y):
         return np.sin(a * x) * np.sin(b * y)
 
-    def g(x, y):
+    def phi(x, y):
         return (x - cx) ** 2 + (y - cy) ** 2 - R**2
 
     def u_ex(x, y):
-        return S(x, y) * g(x, y)
+        return S(x, y) * (phi(x, y) + 1)
 
     def grad_u_ex(x, y):
         Sx = a * np.cos(a * x) * np.sin(b * y)
         Sy = b * np.sin(a * x) * np.cos(b * y)
-        return g(x, y) * Sx + S(x, y) * 2 * (x - cx), g(x, y) * Sy + S(x, y) * 2 * (y - cy)
+        p1 = phi(x, y) + 1
+        return p1 * Sx + S(x, y) * 2 * (x - cx), p1 * Sy + S(x, y) * 2 * (y - cy)
 
     def f(x, y):
-        return ((1 + a**2 + b**2) * S(x, y) * g(x, y)
+        return ((1 + a**2 + b**2) * S(x, y) * (phi(x, y) + 1)
                 - 4 * (a * (x - cx) * np.cos(a * x) * np.sin(b * y)
                        + b * (y - cy) * np.sin(a * x) * np.cos(b * y))
                 - 4 * S(x, y))
@@ -142,7 +144,7 @@ def validation():
     print(f"{'h':>8} {'nœuds':>8} {'erreur L2':>12} {'ordre':>6} {'erreur H1':>12} {'ordre':>6}")
     for k, h in enumerate(hs):
         mesh = build_mesh(obstacle, LX, LY, h, 0.3 * h, 1.6 * h, 0.9 * h)
-        U = solve(mesh, f)
+        U = solve(mesh, f, g_beta=u_ex)
         l2, h1 = compute_errors(mesh, U, u_ex, grad_u_ex)
         e_l2.append(l2)
         e_h1.append(h1)
@@ -155,23 +157,28 @@ def validation():
     plot_convergence(hs, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
 
 
-def application(name, obstacle, suffix="", Lx=LX, Ly=LY):
+def application(name, obstacle, suffix="", Lx=LX, Ly=LY, g_beta=None):
     print(f"\n=== Application : {name}, f = 1, Omega = [0, {Lx}] x [0, {Ly}] ===")
     mesh = build_mesh(obstacle, Lx, Ly, H, H_BETA, DELTA, M_BETA)
     print(f"{mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, {len(mesh.quad)} quadrilatères, "
           f"{len(mesh.bnd)} nœuds de bord")
-    U = solve(mesh, lambda x, y: np.ones_like(x))
+    U = solve(mesh, lambda x, y: np.ones_like(x), g_beta)
     print(f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}")
     plot_mesh(mesh, os.path.join(OUT, f"maillage{suffix}.png"))
-    plot_solution(mesh, U, os.path.join(OUT, f"solution{suffix}.png"), "Solution $u_h$ pour $f = 1$")
+    title = "Solution $u_h$ pour $f = 1$" + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else "")
+    plot_solution(mesh, U, os.path.join(OUT, f"solution{suffix}.png"), title)
 
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     validation()
-    application("cacahuète", peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]))
+    cacahuete, Lx, Ly, _ = domain_from_obstacle(peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]),
+                                                H, D_MIN, M_BETA)
+    application("cacahuète", cacahuete, Lx=Lx, Ly=Ly)
+    application("cacahuète, u = g_beta = 1 + x/Lx sur dbeta", cacahuete, suffix="_dirichlet", Lx=Lx, Ly=Ly,
+                g_beta=lambda x, y: 1 + x / Lx)
     polygon, Lx, Ly, _ = domain_from_obstacle(Polygon(POLYGON), H, D_MIN, M_BETA)
-    application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly)
+    application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly,g_beta=lambda x,y : np.exp(0.1*(x-y)))
     step, Lx, Ly, _ = domain_from_obstacle(from_step(STEP), H, D_MIN, M_BETA)
     application("fichier STEP", step, suffix="_step", Lx=Lx, Ly=Ly)
     puzzle, Lx, Ly, _ = domain_from_obstacle(from_step(PUZZLE), H, D_MIN, M_BETA)

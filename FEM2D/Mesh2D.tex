@@ -30,18 +30,35 @@ précise pour qu'une IA puisse l'implémenter en Python.
 Soit $\Omega$ un rectangle et $\beta \subset \Omega$ un obstacle (défini à la
 section~\ref{sec:beta}). On pose $D = \Omega \setminus \beta$, dont le bord
 est $\partial D = \partial\Omega \cup \partial\beta$. Pour $f \in L^2(D)$
-donnée, on souhaite résoudre le problème
+et $g_\beta$ une fonction régulière définie au voisinage de $\partial\beta$,
+données, on souhaite résoudre le problème
 \[
 (P)\quad
 \begin{cases}
 -\Delta u + u = f & \text{dans } D,\\[2pt]
-u = 0 & \text{sur } \partial D .
+u = 0 & \text{sur } \partial \Omega ,\\[2pt]
+u = g_\beta & \text{sur } \partial \beta .
 \end{cases}
 \]
+Le cas $g_\beta = 0$ correspond à la condition homogène $u = 0$ sur
+$\partial D$.
 
 \section{Formulation variationnelle}
 
-On pose $V = H^1_0(D)$. Soit $v \in V$. On multiplie l'équation par $v$ et
+On pose $V = H^1_0(D)$ et
+\[
+V_g = \big\{ v \in H^1(D) \ :\ v = 0 \text{ sur } \partial\Omega,\ \
+v = g_\beta \text{ sur } \partial\beta \big\},
+\]
+où les égalités au bord s'entendent au sens des traces. $V_g$ est non vide
+dès que $g_\beta \in H^{1/2}(\partial\beta)$, ce qui est le cas pour
+$g_\beta$ régulière : on peut construire un \emph{relèvement}
+$u_g \in V_g$, par exemple $u_g = \chi\, g_\beta$ avec $\chi$ une fonction
+régulière égale à $1$ près de $\beta$ et nulle près de $\partial\Omega$
+(possible car $\partial\beta$ et $\partial\Omega$ sont disjoints). On a
+alors $V_g = u_g + V$.
+
+Soit $v \in V$. On multiplie l'équation par $v$ et
 on intègre sur $D$. La formule de Green donne
 \[
 \int_D -\Delta u \, v
@@ -53,7 +70,8 @@ d'où
 \int_D -\Delta u \, v + \int_D u\, v
 = \int_D \nabla u \cdot \nabla v + \int_D u\, v .
 \]
-On définit
+Les fonctions test restent nulles sur tout $\partial D$ : seule l'inconnue
+$u$ porte la condition $u = g_\beta$. On définit
 \begin{align*}
 a(u, v) &= \int_D \nabla u \cdot \nabla v + \int_D u\, v,\\
 \ell(v) &= \int_D f\, v.
@@ -61,18 +79,36 @@ a(u, v) &= \int_D \nabla u \cdot \nabla v + \int_D u\, v,\\
 
 \paragraph{Problème continu.}
 \[
-(P_V)\quad \text{Trouver } u \in V \text{ tel que } a(u, v) = \ell(v)
+(P_V)\quad \text{Trouver } u \in V_g \text{ tel que } a(u, v) = \ell(v)
 \quad \forall v \in V .
 \]
-
-\paragraph{Problème discret.} Pour un espace de dimension finie
-$V_h \subset V$ (défini à la section~\ref{sec:Vh}) :
+En écrivant $u = u_g + u_0$ avec $u_0 \in V$, cela équivaut à
 \[
-(P_h)\quad \text{Trouver } u_h \in V_h \text{ tel que } a(u_h, v_h) = \ell(v_h)
+\text{Trouver } u_0 \in V \text{ tel que }
+a(u_0, v) = \ell(v) - a(u_g, v) \quad \forall v \in V ,
+\]
+qui est un problème homogène avec un second membre modifié.
+
+\paragraph{Problème discret.} On note $W_h$ l'espace des fonctions
+continues, $P_2$ ou $Q_2$ par morceaux, sans condition au bord, et
+$V_h = W_h \cap \{ v = 0 \text{ sur } \partial D_h \}$
+(section~\ref{sec:Vh}). On remplace $g_\beta$ par son interpolée aux nœuds
+de $\partial\beta$ :
+\[
+\begin{aligned}
+V_{g,h} = \big\{ v_h \in W_h \ :\ & v_h(x_j) = 0 \text{ pour les nœuds } x_j \in \partial\Omega,\\
+& v_h(x_j) = g_\beta(x_j) \text{ pour les nœuds } x_j \in \partial\beta \big\},
+\end{aligned}
+\]
+\[
+(P_h)\quad \text{Trouver } u_h \in V_{g,h} \text{ tel que } a(u_h, v_h) = \ell(v_h)
 \quad \forall v_h \in V_h .
 \]
-La condition $u_h = 0$ sur $\partial D$ est contenue dans la définition de
-$V_h$.
+Le relèvement discret est $u_{g,h} = \sum_{x_j \in \partial\beta}
+g_\beta(x_j)\, \varphi_j$ (fonctions de base nodales de $W_h$), et
+$V_{g,h} = u_{g,h} + V_h$. Les conditions au bord sont donc contenues
+dans la définition de $V_{g,h}$ : elles fixent les valeurs aux nœuds de
+bord (section~\ref{sec:dirichlet}).
 
 \begin{theoreme}[Lax--Milgram]
 Soit $V$ un espace de Hilbert, $a$ une forme bilinéaire continue et
@@ -89,23 +125,31 @@ a(v,v) = \|v\|_{H^1}^2,
 \qquad
 |\ell(v)| \le \|f\|_{L^2} \|v\|_{H^1} .
 \]
-$a$ est donc continue et coercive (de constante $1$) et $\ell$ est continue.
-Le théorème s'applique à $V$ et à $V_h$ : $(P_V)$ et $(P_h)$ ont chacun une
+$a$ est donc continue et coercive (de constante $1$) et $\ell$ est continue,
+de même que $v \mapsto \ell(v) - a(u_g, v)$. Le théorème s'applique à
+$u_0 \in V$ et à $u_h - u_{g,h} \in V_h$ : $(P_V)$ et $(P_h)$ ont chacun une
 unique solution.
 
 \paragraph{Estimation d'erreur (lemme de Céa).} En retranchant $(P_h)$ à
 $(P_V)$ avec $v = v_h$, on obtient $a(u - u_h, v_h) = 0$ pour tout
-$v_h \in V_h$. Comme $a$ est le produit scalaire de $H^1$, $u_h$ est la
-projection orthogonale de $u$ sur $V_h$, donc
+$v_h \in V_h$. Soit $w_h \in V_{g,h}$ : comme $u_h - w_h \in V_h$,
 \[
-\|u - u_h\|_{H^1} = \min_{v_h \in V_h} \|u - v_h\|_{H^1} .
+\|u - u_h\|_{H^1}^2 = a(u - u_h, u - w_h) + a(u - u_h, w_h - u_h)
+= a(u - u_h, u - w_h) \le \|u - u_h\|_{H^1}\, \|u - w_h\|_{H^1},
 \]
-L'erreur ne dépend donc que de la capacité de $V_h$ à approcher $u$. Pour
-des éléments de degré 2, on attend $\|u - u_h\|_{H^1} = O(h^2)$ et
-$\|u - u_h\|_{L^2} = O(h^3)$.
+donc
+\[
+\|u - u_h\|_{H^1} = \min_{w_h \in V_{g,h}} \|u - w_h\|_{H^1} .
+\]
+L'erreur ne dépend donc que de la capacité de $V_{g,h}$ à approcher $u$.
+L'interpolée nodale $I_h u$ appartient à $V_{g,h}$, puisque
+$u = g_\beta$ aux nœuds de $\partial\beta$. Pour des éléments de degré 2 et
+$u$ assez régulière (ce qui demande $g_\beta$ régulière), on attend
+$\|u - u_h\|_{H^1} = O(h^2)$ et $\|u - u_h\|_{L^2} = O(h^3)$.
 
 \paragraph{Remarque.} Avec des triangles courbes, le domaine maillé $D_h$
-n'est pas exactement $D$ : en toute rigueur $V_h \not\subset H^1_0(D)$.
+n'est pas exactement $D$ : en toute rigueur $V_h \not\subset H^1_0(D)$, et
+$g_\beta$ n'est imposée exactement qu'aux nœuds de $\partial\beta$.
 L'erreur géométrique commise est d'un ordre supérieur et ne dégrade pas les
 taux ci-dessus.
 
@@ -164,7 +208,7 @@ Les opérations géométriques dont le code a besoin sont alors :
   \item \textbf{distance} $d(x, \beta)$ : distance minimale de $x$ à un
         échantillonnage fin de $\gamma$ (par exemple 2000 points), mise à
         zéro si $x \in \beta$ ;
-  \item \textbf{fonction de niveau} $g_\beta(x) = \rho(x)^2 - r(\theta(x))^2$,
+  \item \textbf{fonction de niveau} $\phi_\beta(x) = \rho(x)^2 - r(\theta(x))^2$,
         négative dans $\beta$, nulle sur $\partial\beta$ et positive dans
         $D$. Elle est régulière dans $D$ car le centre $c$ est dans $\beta$.
 \end{itemize}
@@ -228,10 +272,11 @@ les deux contours (celui de $\beta$ et celui de la grille, dont les nœuds sont
 fixés), puis il remplit la zone entre les deux avec des triangles, en suivant
 la taille de maille $h_{\mathrm{loc}}(x)$ définie ci-dessus. La figure
 ci-dessous est produite par \texttt{code/main.py} avec les paramètres par
-défaut de la section~\ref{sec:parametres} ($\Omega = [0,7] \times [0,5]$,
-$h = 0.5$, $h_\beta = 0.15$, $\delta = 0.8$, $m_\beta = 1$, obstacle en
-forme de cacahuète) ; le maillage compte 83 quadrilatères et
-296 triangles. Les arêtes posées sur $\partial\beta$ sont tracées courbes.
+défaut de la section~\ref{sec:parametres} ($h = 0.5$, $h_\beta = 0.15$,
+$\delta = 0.8$, $m_\beta = 1$, obstacle en forme de cacahuète), le rectangle
+$\Omega = [0; 8.5] \times [0; 7.5]$ étant construit autour de $\beta$ comme à
+la section~\ref{sec:omega} avec $d_{\min} = m_\beta + 4h = 3$ ; le maillage
+compte 196 quadrilatères et 318 triangles. Les arêtes posées sur $\partial\beta$ sont tracées courbes.
 
 \begin{center}
 \includegraphics[width=0.85\textwidth]{code/resultats/maillage.png}
@@ -730,6 +775,9 @@ degré 2 de l'abscisse le long de l'arête, qui coïncident en trois points
 (les deux sommets et le milieu), donc partout. $V_h$ est engendré par les
 fonctions de base nodales $\varphi_j$ (valant $1$ au nœud $j$ et $0$ aux
 autres nœuds) associées aux nœuds qui ne sont pas sur $\partial D_h$.
+L'espace $W_h$ de la formulation variationnelle est défini de la même
+façon, sans la condition $v = 0$ sur $\partial D_h$ : il est engendré par
+les $\varphi_j$ de tous les nœuds.
 
 \subsection{Passage à l'élément de référence}
 \label{sec:ref}
@@ -1013,7 +1061,8 @@ On sépare les nœuds en deux ensembles :
   \item $\mathcal{I}$ : les nœuds intérieurs ;
   \item $\mathcal{B}$ : les nœuds situés sur $\partial\Omega$ ou sur
         $\partial\beta$ (y compris les milieux $P_2$ placés sur la courbe
-        $\partial\beta$).
+        $\partial\beta$). On note $\mathcal{B}_\beta \subset \mathcal{B}$
+        ceux de $\partial\beta$.
 \end{itemize}
 En renumérotant les inconnues dans cet ordre, le système s'écrit par blocs
 \[
@@ -1025,16 +1074,31 @@ A_{\mathcal{B}\mathcal{I}} & A_{\mathcal{B}\mathcal{B}}
 =
 \begin{pmatrix} F_{\mathcal{I}} \\ F_{\mathcal{B}} \end{pmatrix}.
 \]
-La condition $u = 0$ sur $\partial D$ impose $U_{\mathcal{B}} = 0$. Les
-lignes associées à $\mathcal{B}$ ne sont plus des équations à résoudre, et
-il reste
+Les conditions au bord fixent $U_{\mathcal{B}} = G_{\mathcal{B}}$, avec
 \[
-\boxed{\ A_{\mathcal{I}\mathcal{I}}\, U_{\mathcal{I}} = F_{\mathcal{I}}\ }
+G_j = 0 \ \text{ pour } j \in \mathcal{B} \setminus \mathcal{B}_\beta
+\ (\text{nœuds de } \partial\Omega),
+\qquad
+G_j = g_\beta(x_j) \ \text{ pour } j \in \mathcal{B}_\beta .
 \]
-$A_{\mathcal{I}\mathcal{I}}$ est symétrique définie positive, donc le système
-admet une unique solution. On le résout avec
+Les milieux $P_2$ des arêtes de $\partial\beta$ étant placés exactement sur
+la courbe, $g_\beta$ y est évaluée sans erreur géométrique. Les lignes
+associées à $\mathcal{B}$ ne sont plus des équations à résoudre (on ne
+teste qu'avec les $\varphi_i$, $i \in \mathcal{I}$, qui forment une base de
+$V_h$). La première ligne de blocs donne alors
+\[
+\boxed{\ A_{\mathcal{I}\mathcal{I}}\, U_{\mathcal{I}} = F_{\mathcal{I}}
+- A_{\mathcal{I}\mathcal{B}}\, G_{\mathcal{B}}\ }
+\]
+Le terme $-A_{\mathcal{I}\mathcal{B}} G_{\mathcal{B}}$ est la version
+discrète de $-a(u_g, v)$ : il transporte la condition au bord dans le
+second membre. $A_{\mathcal{I}\mathcal{I}}$ est symétrique définie positive,
+donc le système admet une unique solution. On le résout avec
 \texttt{scipy.sparse.linalg.spsolve} (ou un gradient conjugué), puis on
-reconstruit $U$ en complétant par $U_{\mathcal{B}} = 0$.
+reconstruit $U$ en complétant par $U_{\mathcal{B}} = G_{\mathcal{B}}$. La
+matrice $A$ et le vecteur $F$ sont assemblés comme dans le cas homogène :
+seul le second membre du système réduit change. Si $g_\beta = 0$, on
+retrouve $A_{\mathcal{I}\mathcal{I}} U_{\mathcal{I}} = F_{\mathcal{I}}$.
 
 \subsection{Récapitulatif des tableaux}
 
@@ -1047,6 +1111,7 @@ Nom & Taille & Contenu \\
 \texttt{tri}    & $n_T \times 6$ & numéros globaux des nœuds de chaque triangle \\
 \texttt{quad}   & $n_Q \times 9$ & numéros globaux des nœuds de chaque quadrilatère \\
 \texttt{bnd}    & $|\mathcal{B}|$ & indices des nœuds de $\partial\Omega \cup \partial\beta$ \\
+\texttt{bnd\_beta} & $|\mathcal{B}_\beta|$ & indices des nœuds de $\partial\beta$ (sous-ensemble de \texttt{bnd}) \\
 $A^K$, $F^K$    & $n_K \times n_K$, $n_K$ & matrice et vecteur élémentaires \\
 $A$             & $N \times N$ (creuse) & $R + M$ assemblée \\
 $F$             & $N$ & second membre assemblé \\
@@ -1064,28 +1129,33 @@ même que celui des éléments de référence ci-dessus.
 \subsection{Solution manufacturée}
 
 Pour vérifier le code, on choisit une solution exacte $u_{\mathrm{ex}}$ qui
-s'annule sur $\partial\Omega$ et sur $\partial\beta$, et on en déduit $f$.
+s'annule sur $\partial\Omega$ mais pas sur $\partial\beta$, afin de tester
+aussi la condition non homogène. On en déduit $f$, et on prend
+$g_\beta = u_{\mathrm{ex}}$ (restreinte à $\partial\beta$).
 On prend $\Omega = [0, L_x] \times [0, L_y]$ et pour $\beta$ le disque de
 centre $c$ et de rayon $R$. Avec $a = \pi / L_x$ et $b = \pi / L_y$ :
 \[
 S(x,y) = \sin(a x)\sin(b y),
 \qquad
-g(x,y) = (x - c_x)^2 + (y - c_y)^2 - R^2,
+\phi(x,y) = (x - c_x)^2 + (y - c_y)^2 - R^2,
 \qquad
-u_{\mathrm{ex}} = S\, g .
+u_{\mathrm{ex}} = S\, (\phi + 1) .
 \]
-$S$ s'annule sur $\partial\Omega$ et $g$ sur $\partial\beta$. On a
+$S$ s'annule sur $\partial\Omega$ et $\phi$ sur $\partial\beta$, donc
+$u_{\mathrm{ex}} = 0$ sur $\partial\Omega$ et $u_{\mathrm{ex}} = S$ sur
+$\partial\beta$ ; $S$ n'est pas nulle sur $\partial\beta$ puisque $\beta$ est
+à l'intérieur de $\Omega$. On a
 \[
-\nabla u_{\mathrm{ex}} = g\, \nabla S + S\, \nabla g,
+\nabla u_{\mathrm{ex}} = (\phi + 1)\, \nabla S + S\, \nabla \phi,
 \qquad
 \nabla S = \begin{pmatrix} a \cos(a x)\sin(b y) \\ b \sin(a x)\cos(b y) \end{pmatrix},
 \qquad
-\nabla g = 2 \begin{pmatrix} x - c_x \\ y - c_y \end{pmatrix},
+\nabla \phi = 2 \begin{pmatrix} x - c_x \\ y - c_y \end{pmatrix},
 \]
-et, avec $\Delta S = -(a^2 + b^2) S$ et $\Delta g = 4$,
+et, avec $\Delta S = -(a^2 + b^2) S$ et $\Delta \phi = 4$,
 \[
 f = -\Delta u_{\mathrm{ex}} + u_{\mathrm{ex}}
-= (1 + a^2 + b^2)\, S\, g
+= (1 + a^2 + b^2)\, S\, (\phi + 1)
 - 4\big[ a (x - c_x) \cos(a x)\sin(b y) + b (y - c_y) \sin(a x)\cos(b y) \big]
 - 4 S .
 \]
@@ -1122,7 +1192,9 @@ On doit observer $p \approx 3$ pour l'erreur $L^2$ et $p \approx 2$ pour
 l'erreur $H^1$. Un ordre $H^1$ proche de $1.5$ indique en général que les
 milieux des arêtes de $\partial\beta$ ne sont pas placés sur la courbe. Un
 ordre proche de $1$ ou une erreur qui ne diminue pas indique une erreur
-dans les fonctions de base, la numérotation locale ou l'assemblage.
+dans les fonctions de base, la numérotation locale ou l'assemblage. Une
+erreur qui stagne dès le premier pas indique souvent que $g_\beta$ n'est pas
+imposée (ou mal évaluée) aux nœuds de $\partial\beta$.
 
 \subsection{Cas d'application}
 
@@ -1132,6 +1204,11 @@ $u_h$ est positive, nulle sur $\partial D$ et régulière. On fait de même pour
 l'obstacle polygonal (section~\ref{sec:polygone}) et pour les obstacles lus
 dans les fichiers STEP de \texttt{code/cao/} (section~\ref{sec:step}), y
 compris l'obstacle non connexe.
+
+Pour illustrer la condition non homogène, on reprend la cacahuète avec
+$f = 1$ et $g_\beta(x,y) = 1 + x / L_x$ sur $\partial\beta$ : $u_h$ doit
+valoir $g_\beta$ sur $\partial\beta$, s'annuler sur $\partial\Omega$ et
+décroître régulièrement entre les deux.
 
 \section{Paramètres et sorties attendues}
 
@@ -1143,14 +1220,15 @@ compris l'obstacle non connexe.
 \hline
 Paramètre & Valeur & Rôle \\
 \hline
-$L_x$, $L_y$     & $7$, $5$     & dimensions de $\Omega$ ($L_x/h$, $L_y/h$ entiers) \\
+$L_x$, $L_y$     & $7$, $5$     & $\Omega$ de validation ($L_x/h$, $L_y/h$ entiers) \\
+$d_{\min}$       & $m_\beta + 4h = 3$ & marge entre $\beta$ et $\partial\Omega$ (applications) \\
 $h$              & $0.5$        & pas de la grille \\
 $h_\beta$        & $0.15$       & pas sur $\partial\beta$ \\
 $\delta$         & $0.8$        & largeur de la zone de transition \\
 $m_\beta$        & $1$         & distance minimale entre $\mathcal{Q}$ et $\beta$ \\
 disque           & $c = (3.5, 2.5)$, $R = 1$ & obstacle de validation \\
 cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
-                 & $\varepsilon = 0.35$ & \\
+                 & $\varepsilon = 0.35$ & (puis translatée avec $\Omega$) \\
 \hline
 \end{tabular}
 \end{center}
@@ -1162,12 +1240,12 @@ cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
 \hline
 Module & Contenu \\
 \hline
-\texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, $g_\beta$, \\
+\texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, $\phi_\beta$, \\
                       & polygone, lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
 \texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
 \texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$, $R^K$, $M^K$, $F^K$, assemblage creux \\
-\texttt{solver.py}    & élimination des nœuds de $\mathcal{B}$, résolution \\
+\texttt{solver.py}    & élimination des nœuds de $\mathcal{B}$ ($U_\mathcal{B} = G_\mathcal{B}$), résolution \\
 \texttt{main.py}      & cas de validation, étude de convergence, figures \\
 \texttt{cao/}         & fichiers STEP d'exemple et script \texttt{make\_obstacle.py} \\
 \hline
@@ -1183,7 +1261,8 @@ Dépendances : \texttt{numpy}, \texttt{scipy}, \texttt{gmsh}, \texttt{matplotlib
         (\texttt{maillage\_polygone.png} pour l'obstacle polygonal,
         \texttt{maillage\_step.png}, \texttt{maillage\_puzzle.png} et
         \texttt{maillage\_non\_connexe.png} pour les obstacles STEP ; de même
-        pour \texttt{solution*.png}).
+        pour \texttt{solution*.png}, et \texttt{solution\_dirichlet.png} pour
+        la cacahuète avec $u = g_\beta$ sur $\partial\beta$).
   \item \texttt{solution.png} : $u_h$ en couleurs. Pour l'affichage, chaque
         triangle $P_2$ est découpé en 4 sous-triangles et chaque carré $Q_2$
         en 8 à l'aide des nœuds milieux, puis on trace le résultat avec

@@ -17,6 +17,7 @@ class Obstacle:
         # Échantillonnage fin de gamma, utilisé pour la distance et l'abscisse curviligne
         self.t_fine = np.linspace(0.0, 2 * np.pi, n_samples, endpoint=False)
         self.pts_fine = self.gamma(self.t_fine)
+        self.vertices = self.pts_fine  # échantillons de gamma (boîte englobante de beta)
         self.tree = cKDTree(self.pts_fine)
 
     def gamma(self, t):
@@ -33,7 +34,7 @@ class Obstacle:
         return rho <= self.radius(theta)
 
     def level(self, x, y):
-        """g_beta = rho^2 - r(theta)^2 : < 0 dans beta, = 0 sur le bord, > 0 dans D."""
+        """phi_beta = rho^2 - r(theta)^2 : < 0 dans beta, = 0 sur le bord, > 0 dans D."""
         rho, theta = self.polar(x, y)
         return rho**2 - self.radius(theta) ** 2
 
@@ -272,8 +273,8 @@ def domain_from_obstacle(obstacle, h, d_min, m_beta=None):
 
     La distance d'un segment de beta à un côté de Omega est atteinte en un sommet :
     il suffit d'imposer la marge d_min autour de la boîte englobante des sommets
-    (sommets du polygone, ou échantillons de gamma pour un CurveObstacle ou un
-    MultiObstacle).
+    (sommets du polygone, ou échantillons de gamma pour un Obstacle, un
+    CurveObstacle ou un MultiObstacle).
     beta est centré dans Omega puis translaté pour que Omega commence en (0, 0).
     Renvoie (obstacle translaté, Lx, Ly, décalage appliqué aux sommets).
     """

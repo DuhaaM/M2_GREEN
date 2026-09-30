@@ -1,7 +1,8 @@
 """Construction du maillage mixte Q2 (grille) / P2 (gmsh autour de beta).
 
 Sections 3.2 et 3.3 de main.tex. Le résultat est un objet Mesh contenant :
-    coords (N, 2), tri (n_T, 6), quad (n_Q, 9), bnd (indices des nœuds de bord).
+    coords (N, 2), tri (n_T, 6), quad (n_Q, 9), bnd (indices des nœuds de bord),
+    bnd_beta (indices des nœuds de bord situés sur dbeta, sous-ensemble de bnd).
 """
 from dataclasses import dataclass
 
@@ -15,6 +16,7 @@ class Mesh:
     tri: np.ndarray
     quad: np.ndarray
     bnd: np.ndarray
+    bnd_beta: np.ndarray  # nœuds de dbeta (y compris les milieux P2 placés sur la courbe)
     beta_points: list  # points de discrétisation de gamma, un tableau par composante de beta
 
     @property
@@ -254,6 +256,8 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     tol = 1e-10 * h
     x, y = coords[:, 0], coords[:, 1]
     on_omega = (np.abs(x) < tol) | (np.abs(x - Lx) < tol) | (np.abs(y) < tol) | (np.abs(y - Ly) < tol)
-    bnd = np.nonzero(on_omega | np.array(on_beta))[0]
+    on_beta = np.array(on_beta)
+    bnd = np.nonzero(on_omega | on_beta)[0]
+    bnd_beta = np.nonzero(on_beta)[0]
 
-    return Mesh(coords=coords, tri=tri, quad=quad, bnd=bnd, beta_points=beta_xy)
+    return Mesh(coords=coords, tri=tri, quad=quad, bnd=bnd, bnd_beta=bnd_beta, beta_points=beta_xy)
