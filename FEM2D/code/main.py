@@ -7,10 +7,12 @@ Sections 6 et 7 de main.tex. Lancer :
     python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0
                                           plusieurs obstacles, type choisi pour chacun
     python3 main.py tous                  tous les cas en parallèle, sans validation du maillage
+    python3 main.py erreurs --h 0.25      erreur de chaque élément (cas de validation), au clic
 Le maillage est affiché et doit être validé avant l'assemblage et la résolution.
 Les figures sont écrites dans le dossier resultats/ à côté de ce fichier.
 """
 import argparse
+import hashlib
 import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -19,12 +21,15 @@ from typing import Callable, Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button
-from matplotlib.collections import LineCollection
+from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.colors import LogNorm
+from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.path import Path
 from matplotlib.tri import Triangulation
+from matplotlib.widgets import Button, RadioButtons
 import numpy as np
 
-from assembly import compute_errors
+from assembly import element_errors, total_errors
 from geometry import MultiObstacle, Polygon, disk, domain_from_obstacle, from_step, peanut
 from mesh import build_mesh
 from solver import solve
@@ -48,8 +53,8 @@ STEP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "obstacle
 PUZZLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "Puzzle.step")
 # beta non connexe : deux composantes proches (généré par cao/make_obstacle.py)
 DEUX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cao", "deux_obstacles.step")
-# Distance minimale entre beta et le bord de Omega, construit autour du polygone (section 3.5)
-D_MIN = M_BETA + 4*H
+# Backends matplotlib sans fenêtre : les figures sont seulement écrites sur disque
+NON_INTERACTIVE = {"agg", "pdf", "ps", "svg", "pgf", "cairo", "template"}
 
 
 # ----------------------------------------------------------------------------
@@ -96,12 +101,11 @@ def manufactured(cx, cy, R, G, grad_G, lap_G):
 # ----------------------------------------------------------------------------
 TRI_SUB = [[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]]
 _Q_GRID = [[0, 4, 1], [7, 8, 5], [3, 6, 2]]  # nœuds Q2 rangés par lignes (y^ = -1, 0, 1)
-QUAD_SUB = []
-for _b in range(2):
-    for _a in range(2):
-        p, q = _Q_GRID[_b][_a], _Q_GRID[_b][_a + 1]
-        r, s = _Q_GRID[_b + 1][_a + 1], _Q_GRID[_b + 1][_a]
-        QUAD_SUB += [[p, q, r], [p, r, s]]
+# Chaque sous-carré (i, j) du carré Q2, de sommets p q r s, coupé selon la diagonale p r
+QUAD_SUB = [tri
+            for i in range(2) for j in range(2)
+            for p, q, r, s in [(_Q_GRID[i][j], _Q_GRID[i][j + 1], _Q_GRID[i + 1][j + 1], _Q_GRID[i + 1][j])]
+            for tri in ([p, q, r], [p, r, s])]
 
 
 def plot_triangulation(mesh):
@@ -162,8 +166,6 @@ def plot_convergence(hs, e_l2, e_h1, path):
     plt.close(fig)
 
 
-
-
 # ----------------------------------------------------------------------------
 # Cas d'application : obstacles disponibles
 # ----------------------------------------------------------------------------
@@ -186,6 +188,7 @@ class Case:
     make: Callable                     # () -> obstacle, en coordonnées quelconques
     suffix: str = ""                   # suffixe des figures maillage*.png, solution*.png
     g_beta: Optional[Callable] = None  # (Lx, Ly) -> g_beta ; None : u = 0 sur dbeta
+    f: Optional[Callable] = None       # (Lx, Ly) -> (f, titre LaTeX) ; None : f = 1
 
 
 # Fonctions du module (et non des lambda) : les cas passent d'un processus à l'autre
@@ -195,6 +198,13 @@ def g_dirichlet(Lx, Ly):
 
 def g_polygon(Lx, Ly):
     return lambda x, y: np.exp(0.1 * (x - y))
+
+
+def f_gauss(Lx, Ly, sigma=0.5):
+    """Source gaussienne centrée en (Lx/4, 3Ly/4), hors de beta pour les cas centrés."""
+    x0, y0 = Lx / 4, 3 * Ly / 4
+    return (lambda x, y: np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2)),
+            rf"$f = e^{{-|x - x_0|^2 / 2\sigma^2}}$, $x_0 = ({x0:g}, {y0:g})$, $\sigma = {sigma:g}$")
 
 
 def obstacles_eloignes():
@@ -213,6 +223,8 @@ CASES = {
     "polygone": Case("polygone", partial(Polygon, POLYGON), "_polygone", g_polygon),
     "step": Case("fichier STEP", partial(from_step, STEP), "_step"),
     "puzzle": Case("pièce de puzzle (Puzzle.step)", partial(from_step, PUZZLE), "_puzzle"),
+    "puzzle_gauss": Case("pièce de puzzle (Puzzle.step), f gaussienne", partial(from_step, PUZZLE),
+                         "_puzzle_gauss", f=f_gauss),
     "non_connexe": Case("beta non connexe (deux_obstacles.step)", partial(from_step, DEUX),
                         "_non_connexe"),
     "eloignes": Case("trois obstacles éloignés, u = g_beta = 1 + x/Lx sur dbeta",
@@ -221,8 +233,11 @@ CASES = {
 
 
 def step_file_case(path, scale=1.0):
-    stem = os.path.splitext(os.path.basename(path))[0]
-    return Case(f"fichier {os.path.basename(path)}", partial(from_step, path, scale), f"_{stem}")
+    """Suffixe = nom du fichier en minuscules (Puzzle.step -> _puzzle, comme le cas prédéfini),
+    suivi de l'échelle si elle n'est pas 1."""
+    stem = os.path.splitext(os.path.basename(path))[0].lower()
+    suffix = f"_{stem}" + (f"_x{scale:g}" if scale != 1 else "")
+    return Case(f"fichier {os.path.basename(path)}", partial(from_step, path, scale), suffix)
 
 
 # ----------------------------------------------------------------------------
@@ -239,6 +254,37 @@ KINDS = {
 L_SHAPE = tuple(v for xy in np.array(POLYGON) - POLYGON[0] for v in xy)
 
 
+def check_spec(spec):
+    """Vérifie le type et le nombre de paramètres d'une composante, avant tout maillage.
+
+    Lève ValueError avec un message explicite (au lieu d'une erreur de dépaquetage
+    qui apparaîtrait plus tard comme un échec du maillage).
+    """
+    kind, args = spec[0], list(spec[1:])
+    if kind not in KINDS:
+        raise ValueError(f"type d'obstacle inconnu : {kind} (choix : {', '.join(KINDS)})")
+    names = KINDS[kind][1]
+    if kind == "fichier":
+        if not args or not os.path.isfile(os.path.expanduser(args[0])):
+            raise ValueError(f"fichier : chemin introuvable : {args[0] if args else '(absent)'}")
+        args = args[1:]
+    try:
+        values = [float(a) for a in args]
+    except ValueError:
+        raise ValueError(f"{kind} : paramètres numériques attendus, reçu {' '.join(map(str, args))}")
+    if kind == "fichier":
+        ok = len(names) - 1 <= len(values) <= len(names)
+    elif kind == "polygone":
+        vertices = values[2:]
+        ok = len(values) >= 2 and (not vertices or (len(vertices) % 2 == 0 and len(vertices) >= 6))
+    else:
+        ok = len(values) == len(names)
+    if not ok:
+        usage = {"fichier": "chemin x y [echelle]", "polygone": "x y [x1 y1 x2 y2 x3 y3 ...]"}
+        raise ValueError(f"{kind} : paramètres attendus {usage.get(kind, ' '.join(names))}, "
+                         f"reçu {' '.join(map(str, args)) or 'aucun'}")
+
+
 def make_component(kind, *args):
     """Composantes de beta décrites par (type, paramètres) : liste d'obstacles connexes.
 
@@ -247,7 +293,7 @@ def make_component(kind, *args):
     if kind == "fichier":
         path, args = args[0], [float(a) for a in args[1:]]
         x, y, scale = args + KINDS["fichier"][2][len(args):]
-        obstacle = from_step(path, scale).translated(np.array([x, y]))
+        obstacle = from_step(os.path.expanduser(path), scale).translated(np.array([x, y]))
         return getattr(obstacle, "components", [obstacle])
     args = [float(a) for a in args]
     if kind == "disque":
@@ -271,8 +317,13 @@ def compose(specs):
 
 
 def composed_case(specs):
-    names = ", ".join(spec[0] for spec in specs)
-    return Case(f"obstacles composés ({names})", partial(compose, tuple(map(tuple, specs))), "_compose")
+    """Suffixe _compose_<types>_<empreinte des paramètres> : deux compositions distinctes
+    n'écrivent pas dans les mêmes figures."""
+    specs = tuple(tuple(spec) for spec in specs)
+    kinds = [spec[0] for spec in specs]
+    digest = hashlib.sha1(repr(specs).encode()).hexdigest()[:6]
+    return Case(f"obstacles composés ({', '.join(kinds)})", partial(compose, specs),
+                f"_compose_{'_'.join(kinds)}_{digest}")
 
 
 def ask_component(k):
@@ -378,11 +429,12 @@ def mesh_summary(mesh, Lx, Ly):
 
 
 def compute(case, mesh, Lx, Ly):
-    """Assemblage, résolution pour f = 1 et figures, sur un maillage déjà construit."""
+    """Assemblage, résolution et figures, sur un maillage déjà construit."""
     g_beta = case.g_beta(Lx, Ly) if case.g_beta else None
-    U = solve(mesh, lambda x, y: np.ones_like(x), g_beta)
+    f, f_title = case.f(Lx, Ly) if case.f else (lambda x, y: np.ones_like(x), "$f = 1$")
+    U = solve(mesh, f, g_beta)
     plot_mesh(mesh, os.path.join(OUT, f"maillage{case.suffix}.png"))
-    title = "Solution $u_h$ pour $f = 1$" + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else "")
+    title = f"Solution $u_h$ pour {f_title}" + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else "")
     plot_solution(mesh, U, os.path.join(OUT, f"solution{case.suffix}.png"), title)
     return f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}"
 
@@ -390,7 +442,7 @@ def compute(case, mesh, Lx, Ly):
 def application(case, params=MeshParams()):
     """Cas complet sans validation du maillage (mode « tous »)."""
     mesh, Lx, Ly = prepare(case, params)
-    return "\n".join([f"\n=== Application : {case.name}, f = 1 ===",
+    return "\n".join([f"\n=== Application : {case.name} ===",
                       mesh_summary(mesh, Lx, Ly), compute(case, mesh, Lx, Ly)])
 
 
@@ -402,29 +454,58 @@ def application(case, params=MeshParams()):
 HS = [0.5, 0.25, 0.125, 0.0625]
 
 
-def validation_step(k, h):
-    """Un pas h de l'étude de convergence : (nombre de nœuds, erreur L2, erreur H1)."""
+def element_error_stats(errs):
+    """Moyenne et écart-type des erreurs locales, par type d'élément.
+
+    On compare les densités e_K / sqrt(|K|) (erreur moyenne quadratique sur K) : les
+    triangles sont bien plus petits que les carrés, leurs erreurs brutes ne sont pas
+    comparables. Renvoie {type: (nombre, moy. L2, éc.-type L2, moy. H1, éc.-type H1)}.
+    """
+    stats = {}
+    for name, (area, l2, h1_semi, _) in errs.items():
+        d_l2, d_h1 = np.sqrt(l2 / area), np.sqrt((l2 + h1_semi) / area)
+        stats[name] = (len(area), d_l2.mean(), d_l2.std(), d_h1.mean(), d_h1.std())
+    return stats
+
+
+def validation_problem(h):
+    """Disque de validation résolu pour le pas h : (maillage, U, erreurs locales)."""
     obstacle = disk(DISK["center"], DISK["R"])
     u_ex, grad_u_ex, f = manufactured(*DISK["center"], DISK["R"], G_BETA["G"], G_BETA["grad"], G_BETA["lap"])
     mesh = build_mesh(obstacle, LX, LY, h, 0.3 * h, 1.6 * h, 0.9 * h)
     U = solve(mesh, f, g_beta=u_ex)
-    l2, h1 = compute_errors(mesh, U, u_ex, grad_u_ex)
+    return mesh, U, element_errors(mesh, U, u_ex, grad_u_ex)
+
+
+def validation_step(k, h):
+    """Un pas h de l'étude de convergence :
+    (nombre de nœuds, erreur L2, erreur H1, statistiques par type d'élément)."""
+    mesh, U, errs = validation_problem(h)
+    l2, h1 = total_errors(errs)
     if k == 0:
         plot_solution(mesh, U, os.path.join(OUT, "validation_solution.png"),
                       f"Validation : $u_h$ pour $h = {h}$")
-    return mesh.n_nodes, l2, h1
+    return mesh.n_nodes, l2, h1, element_error_stats(errs)
 
 
 def validation_report(results):
     print("=== Validation : disque, solution manufacturée ===")
     e_l2, e_h1 = [], []
     print(f"{'h':>8} {'nœuds':>8} {'erreur L2':>12} {'ordre':>6} {'erreur H1':>12} {'ordre':>6}")
-    for k, (h, (n_nodes, l2, h1)) in enumerate(zip(HS, results)):
+    for k, (h, (n_nodes, l2, h1, _)) in enumerate(zip(HS, results)):
         e_l2.append(l2)
         e_h1.append(h1)
-        p_l2 = f"{np.log(e_l2[-2] / l2) / np.log(2):6.2f}" if k else f"{'-':>6}"
-        p_h1 = f"{np.log(e_h1[-2] / h1) / np.log(2):6.2f}" if k else f"{'-':>6}"
+        ratio_h = np.log(HS[k - 1] / h) if k else None
+        p_l2 = f"{np.log(e_l2[-2] / l2) / ratio_h:6.2f}" if k else f"{'-':>6}"
+        p_h1 = f"{np.log(e_h1[-2] / h1) / ratio_h:6.2f}" if k else f"{'-':>6}"
         print(f"{h:8.4f} {n_nodes:8d} {l2:12.4e} {p_l2} {h1:12.4e} {p_h1}")
+    print("\nErreur par élément e_K / sqrt(|K|) : moyenne et écart-type, T = triangles, Q = carrés")
+    print(f"{'h':>8} {'type':>4} {'nombre':>7} {'moy. L2':>11} {'éc.-t. L2':>11} {'moy. H1':>11} {'éc.-t. H1':>11}")
+    for h, (*_, stats) in zip(HS, results):
+        for name, label in (("tri", "T"), ("quad", "Q")):
+            if name in stats:
+                n, m_l2, s_l2, m_h1, s_h1 = stats[name]
+                print(f"{h:8.4f} {label:>4} {n:7d} {m_l2:11.3e} {s_l2:11.3e} {m_h1:11.3e} {s_h1:11.3e}")
     plot_convergence(HS, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
 
 
@@ -437,10 +518,10 @@ def run_validation(ex):
     return [ex.submit(validation_step, k, h) for k, h in reversed(list(enumerate(HS)))][::-1]
 
 
-def run_all():
+def run_all(params=MeshParams()):
     with ProcessPoolExecutor(initializer=_worker_init) as ex:
         val = run_validation(ex)
-        apps = [ex.submit(application, case) for case in CASES.values()]
+        apps = [ex.submit(application, case, params) for case in CASES.values()]
         validation_report([fut.result() for fut in val])
         for fut in apps:
             print(fut.result())
@@ -452,11 +533,125 @@ def run_convergence():
 
 
 # ----------------------------------------------------------------------------
+# Erreur de chaque élément : carte cliquable
+# ----------------------------------------------------------------------------
+TYPE_LABEL = {"tri": "T", "quad": "Q"}
+
+
+def element_polygons(mesh, name):
+    """Contour de chaque élément passant par les nœuds milieux (arêtes courbes suivies)."""
+    if name == "tri":
+        return mesh.coords[mesh.tri[:, [0, 3, 1, 4, 2, 5]]]
+    return mesh.coords[mesh.quad[:, [0, 4, 1, 5, 2, 6, 3, 7]]]
+
+
+def zscore(d):
+    """Écart à la moyenne en écarts-types ; 0 si l'écart-type est nul (un seul élément, erreur uniforme)."""
+    std = d.std()
+    return (d - d.mean()) / std if std > 0 else np.zeros_like(d)
+
+
+def error_table(errs):
+    """Grandeurs par élément, triangles puis carrés, dans un dict de tableaux (n_T + n_Q,).
+
+    L2, H1 : densités e_K / sqrt(|K|) ; zL2, zH1 : écart à la moyenne du type de K, en
+    écarts-types ; sd : écart-type de u_ex - u_h aux points de quadrature de K (pondéré).
+    """
+    cols = {k: [] for k in ("type", "index", "area", "eL2", "eH1", "L2", "H1", "zL2", "zH1", "sd")}
+    for name, (area, l2, h1_semi, mean) in errs.items():
+        d_l2, d_h1 = np.sqrt(l2 / area), np.sqrt((l2 + h1_semi) / area)
+        cols["type"].append(np.full(len(area), TYPE_LABEL[name]))
+        cols["index"].append(np.arange(len(area)))
+        cols["area"].append(area)
+        cols["eL2"].append(np.sqrt(l2))
+        cols["eH1"].append(np.sqrt(l2 + h1_semi))
+        cols["L2"].append(d_l2)
+        cols["H1"].append(d_h1)
+        cols["zL2"].append(zscore(d_l2))
+        cols["zH1"].append(zscore(d_h1))
+        cols["sd"].append(np.sqrt(np.maximum(l2 / area - (mean / area) ** 2, 0)))
+    return {k: np.concatenate(v) for k, v in cols.items()}
+
+
+def describe_element(tab, k, center):
+    t = tab["type"][k]
+    return (f"{'triangle' if t == 'T' else 'carré'} {t}{tab['index'][k]}, centre "
+            f"({center[0]:.3f}, {center[1]:.3f}), |K| = {tab['area'][k]:.3e}\n"
+            f"e_K : L2 = {tab['eL2'][k]:.3e}, H1 = {tab['eH1'][k]:.3e}    "
+            f"e_K / sqrt(|K|) : L2 = {tab['L2'][k]:.3e}, H1 = {tab['H1'][k]:.3e}\n"
+            f"écart à la moyenne des {t} : L2 {tab['zL2'][k]:+.2f} σ, H1 {tab['zH1'][k]:+.2f} σ    "
+            f"écart-type de u_ex - u_h dans K : {tab['sd'][k]:.3e}")
+
+
+def show_errors(h):
+    """Carte des densités d'erreur e_K / sqrt(|K|) du cas de validation pour le pas h.
+
+    Un clic sur un élément affiche ses erreurs et son écart à la moyenne de son type.
+    """
+    mesh, _, errs = validation_problem(h)
+    print(f"=== Erreur par élément : disque de validation, h = {h:g} ===")
+    print(f"{'type':>4} {'nombre':>7} {'moy. L2':>11} {'éc.-t. L2':>11} {'moy. H1':>11} {'éc.-t. H1':>11}")
+    for name, (n, m_l2, s_l2, m_h1, s_h1) in element_error_stats(errs).items():
+        print(f"{TYPE_LABEL[name]:>4} {n:7d} {m_l2:11.3e} {s_l2:11.3e} {m_h1:11.3e} {s_h1:11.3e}")
+    tab = error_table(errs)
+    polys = [p for name in errs for p in element_polygons(mesh, name)]
+    centers = np.array([p.mean(axis=0) for p in polys])
+    print("\nÉléments les plus éloignés de la moyenne de leur type (H1) :")
+    for k in np.argsort(-tab["zH1"])[:5]:
+        print(f"  {tab['type'][k]}{tab['index'][k]:<5} centre ({centers[k, 0]:.3f}, {centers[k, 1]:.3f})"
+              f"  e_K/sqrt(|K|) = {tab['H1'][k]:.3e}  ({tab['zH1'][k]:+.2f} σ)")
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    fig.subplots_adjust(bottom=0.2)
+    coll = PolyCollection(polys, cmap="magma", norm=LogNorm(), edgecolors="0.35", linewidths=0.3)
+    coll.set_array(tab["H1"])
+    coll.set_picker(True)
+    ax.add_collection(coll)
+    ax.autoscale_view()
+    draw_beta(ax, mesh)
+    ax.set_aspect("equal")
+    ax.set_title(f"Erreur par élément, h = {h:g} (cliquer sur un élément)")
+    cbar = fig.colorbar(coll, ax=ax, shrink=0.8, label="$e_K / \\sqrt{|K|}$, norme $H^1$")
+    marker = ax.add_patch(MplPolygon(polys[0], fill=False, ec="cyan", lw=2, zorder=5, visible=False))
+    info = fig.text(0.16, 0.02, "", fontsize=8, family="monospace")
+
+    path = os.path.join(OUT, "erreurs_elements.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    if matplotlib.get_backend().lower() in NON_INTERACTIVE:
+        plt.close(fig)
+        print(f"\nPas d'affichage disponible : carte enregistrée dans {path}")
+        return
+
+    def on_pick(event):
+        if event.artist is not coll or not len(event.ind):
+            return
+        # La tolérance de sélection renvoie aussi les voisins : on garde l'élément cliqué
+        xy = event.mouseevent.xdata, event.mouseevent.ydata
+        inside = [k for k in event.ind if Path(polys[k]).contains_point(xy)]
+        k = inside[0] if inside else event.ind[0]
+        marker.set_xy(polys[k])
+        marker.set_visible(True)
+        info.set_text(describe_element(tab, k, centers[k]))
+        fig.canvas.draw_idle()
+
+    def on_norm(label):
+        values = tab[label]
+        coll.set_array(values)
+        coll.norm.vmin, coll.norm.vmax = values.min(), values.max()
+        cbar.set_label(f"$e_K / \\sqrt{{|K|}}$, norme ${label[0]}^{label[1]}$")
+        cbar.update_normal(coll)
+        fig.canvas.draw_idle()
+
+    radio = RadioButtons(fig.add_axes([0.02, 0.03, 0.1, 0.1]), ("H1", "L2"))
+    radio.on_clicked(on_norm)
+    fig.canvas.mpl_connect("pick_event", on_pick)
+    print("\nCarte affichée : cliquer sur un élément pour voir son erreur.")
+    plt.show()
+
+
+# ----------------------------------------------------------------------------
 # Mode interactif : choix de l'obstacle, validation du maillage
 # ----------------------------------------------------------------------------
-NON_INTERACTIVE = {"agg", "pdf", "ps", "svg", "pgf", "cairo", "template"}
-
-
 def ask(prompt, default=""):
     try:
         answer = input(prompt).strip()
@@ -471,11 +666,12 @@ MENU = {
     "composer": "obstacles ajoutés un par un (disque, cacahuète, polygone, fichier CAO)",
     "validation": "étude de convergence (disque, solution manufacturée)",
     "tous": "tous les cas prédéfinis, sans validation du maillage",
+    "erreurs": "erreur de chaque élément (disque de validation), au clic",
 }
 
 
 def choose_case(params=MeshParams()):
-    """Menu : renvoie un Case, ou l'une des chaînes « validation », « tous »."""
+    """Menu : renvoie un Case, ou l'une des chaînes « validation », « tous », « erreurs »."""
     choices = list(MENU)
     for i, key in enumerate(choices, 1):
         print(f"  {i:2d}. {key:<12} {MENU[key]}")
@@ -563,7 +759,7 @@ def interactive(case, params, auto_accept=False):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("obstacle", nargs="?", choices=list(CASES) + ["validation", "tous"],
+    parser.add_argument("obstacle", nargs="?", choices=list(CASES) + ["validation", "tous", "erreurs"],
                         help="obstacle (sans argument : menu)")
     parser.add_argument("--step", metavar="FICHIER", help="obstacle lu dans un fichier STEP / IGES / BREP")
     parser.add_argument("--obstacle", nargs="+", action="append", metavar="TYPE", dest="components",
@@ -573,7 +769,15 @@ def parse_args():
     parser.add_argument("-y", "--oui", action="store_true", help="valider le maillage sans l'afficher")
     for name, value in vars(MeshParams()).items():
         parser.add_argument(f"--{name.replace('_', '-')}", type=float, default=value, dest=name)
-    return parser.parse_args()
+    args = parser.parse_args()
+    for spec in args.components or []:
+        try:
+            check_spec(spec)
+        except ValueError as err:
+            parser.error(f"--obstacle {err}")
+    if args.step and not os.path.isfile(args.step):
+        parser.error(f"--step : fichier introuvable : {args.step}")
+    return args
 
 
 if __name__ == "__main__":
@@ -593,6 +797,8 @@ if __name__ == "__main__":
     if choice == "validation":
         run_convergence()
     elif choice == "tous":
-        run_all()
+        run_all(params)
+    elif choice == "erreurs":
+        show_errors(params.h)
     if choice != "quitter":
         print(f"\nFigures écrites dans {OUT}")
