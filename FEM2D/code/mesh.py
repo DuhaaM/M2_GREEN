@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import gmsh
 import numpy as np
+from scipy import ndimage
 
 
 @dataclass
@@ -35,6 +36,12 @@ def select_cells(obstacle, nx, ny, h, m_beta):
         keep &= (obstacle.distance(pts) >= m_beta).reshape(nx, ny)
 
     while True:
+        # Îlots de cellules isolés du bord de Omega (entourés par des composantes de beta) :
+        # retirés, pour que chaque trou de Q soit bordé par un seul contour
+        labels, _ = ndimage.label(keep)
+        border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
+        keep &= np.isin(labels, border[border > 0])
+
         padded = np.pad(keep, 1)
         n_neighbors = (padded[:-2, 1:-1].astype(int) + padded[2:, 1:-1]
                        + padded[1:-1, :-2] + padded[1:-1, 2:])
@@ -57,41 +64,49 @@ def select_cells(obstacle, nx, ny, h, m_beta):
 
 
 # ----------------------------------------------------------------------------
-# Étape 2 : contour intérieur de Q (suite fermée de sommets de la grille)
+# Étape 2 : contours intérieurs de Q (un par trou, suite fermée de sommets de la grille)
 # ----------------------------------------------------------------------------
-def inner_contour(keep):
-    nx, ny = keep.shape
-    adjacency = {}
+def inner_contours(keep):
+    """Renvoie (loops, holes) : un contour par trou de Q et le numéro de trou de chaque cellule.
 
-    def add_edge(p, q):
-        adjacency.setdefault(p, []).append(q)
-        adjacency.setdefault(q, []).append(p)
+    Les trous sont les composantes connexes (par les arêtes) des cellules non gardées ;
+    holes vaut 0 sur les cellules de Q et k + 1 sur celles du trou k.
+    """
+    nx, ny = keep.shape
+    holes, n_holes = ndimage.label(~keep)
+    padded = np.pad(holes, 1)  # 0 hors de la grille : comme une cellule de Q
+    adjacency = [{} for _ in range(n_holes)]
+
+    def add_edge(k, p, q):
+        adjacency[k - 1].setdefault(p, []).append(q)
+        adjacency[k - 1].setdefault(q, []).append(p)
 
     for i in range(nx):
         for j in range(1, ny):
             if keep[i, j - 1] != keep[i, j]:
-                add_edge((i, j), (i + 1, j))
+                add_edge(max(holes[i, j - 1], holes[i, j]), (i, j), (i + 1, j))
     for i in range(1, nx):
         for j in range(ny):
             if keep[i - 1, j] != keep[i, j]:
-                add_edge((i, j), (i, j + 1))
+                add_edge(max(holes[i - 1, j], holes[i, j]), (i, j), (i, j + 1))
 
-    if any(len(v) != 2 for v in adjacency.values()):
-        raise ValueError("Le contour intérieur de Q n'est pas une courbe simple.")
-
-    start = next(iter(adjacency))
-    loop, prev, cur = [start], None, start
-    while True:
-        a, b = adjacency[cur]
-        nxt = b if a == prev else a
-        if nxt == start:
-            break
-        loop.append(nxt)
-        prev, cur = cur, nxt
-    if len(loop) != len(adjacency):
-        raise ValueError("Le trou de Q contient plusieurs contours fermés "
-                         "(composantes de beta trop éloignées les unes des autres ?).")
-    return loop
+    loops = []
+    for adj in adjacency:
+        if any(len(v) != 2 for v in adj.values()):
+            raise ValueError("Le contour intérieur de Q n'est pas une courbe simple.")
+        start = next(iter(adj))
+        loop, prev, cur = [start], None, start
+        while True:
+            a, b = adj[cur]
+            nxt = b if a == prev else a
+            if nxt == start:
+                break
+            loop.append(nxt)
+            prev, cur = cur, nxt
+        if len(loop) != len(adj):
+            raise ValueError("Un trou de Q est bordé par plusieurs contours fermés.")
+        loops.append(loop)
+    return loops, holes
 
 
 # ----------------------------------------------------------------------------
@@ -127,12 +142,14 @@ def triangulate(contour_xy, betas_xy, h, h_beta, delta):
         geo.synchronize()
 
         field = gmsh.model.mesh.field
+        # Trou de Q sans composante de beta : taille h partout
+        size_min = h_beta if beta_lines else h
         dist = field.add("Distance")
-        field.setNumbers(dist, "CurvesList", beta_lines)
+        field.setNumbers(dist, "CurvesList", beta_lines or contour_lines)
         field.setNumber(dist, "Sampling", 10)
         thr = field.add("Threshold")
         field.setNumber(thr, "InField", dist)
-        field.setNumber(thr, "SizeMin", h_beta)
+        field.setNumber(thr, "SizeMin", size_min)
         field.setNumber(thr, "SizeMax", h)
         field.setNumber(thr, "DistMin", 0.0)
         field.setNumber(thr, "DistMax", delta)
@@ -170,11 +187,16 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
         raise ValueError("Lx / h et Ly / h doivent être entiers.")
 
     keep = select_cells(obstacle, nx, ny, h, m_beta)
-    loop = inner_contour(keep)
+    loops, holes = inner_contours(keep)
     # Composantes connexes de beta (une seule pour Obstacle, Polygon, CurveObstacle)
     comps = getattr(obstacle, "components", [obstacle])
     t_beta = [c.boundary_params(h_beta) for c in comps]
     beta_xy = [c.gamma(t) for c, t in zip(comps, t_beta)]
+    # Trou de Q contenant chaque composante (repéré par la cellule d'un point de son bord)
+    members = [[] for _ in loops]
+    for c, xy in enumerate(beta_xy):
+        i, j = np.clip((xy[0] // h).astype(int), 0, [nx - 1, ny - 1])
+        members[holes[i, j] - 1].append(c)
 
     coords = []            # coordonnées de tous les nœuds
     on_beta = []           # nœud situé sur dbeta
@@ -194,19 +216,24 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     for i, j in zip(*np.nonzero(used)):
         vid[i, j] = new_node((i * h, j * h))
 
-    # 2. Sommets des triangles : ceux des contours reprennent les numéros existants
-    contour_xy = [(i * h, j * h) for i, j in loop]
-    node_xy, tri3, contour_nodes, beta_nodes = triangulate(contour_xy, beta_xy, h, h_beta, delta)
-    g2glob = -np.ones(len(node_xy), dtype=int)
-    for (i, j), g in zip(loop, contour_nodes):
-        g2glob[g] = vid[i, j]
-    for c, nodes in enumerate(beta_nodes):
-        for k, g in enumerate(nodes):
-            g2glob[g] = new_node(tuple(beta_xy[c][k]), is_beta=True)
-            beta_index[g2glob[g]] = (c, k)
-    for g in np.nonzero(g2glob < 0)[0]:
-        g2glob[g] = new_node(tuple(node_xy[g]))
-    tri3 = g2glob[tri3]
+    # 2. Sommets des triangles, une zone T par trou de Q : ceux des contours
+    #    reprennent les numéros existants
+    tri_parts = []
+    for loop, cs in zip(loops, members):
+        contour_xy = [(i * h, j * h) for i, j in loop]
+        node_xy, tri3, contour_nodes, beta_nodes = triangulate(
+            contour_xy, [beta_xy[c] for c in cs], h, h_beta, delta)
+        g2glob = -np.ones(len(node_xy), dtype=int)
+        for (i, j), g in zip(loop, contour_nodes):
+            g2glob[g] = vid[i, j]
+        for c, nodes in zip(cs, beta_nodes):
+            for k, g in enumerate(nodes):
+                g2glob[g] = new_node(tuple(beta_xy[c][k]), is_beta=True)
+                beta_index[g2glob[g]] = (c, k)
+        for g in np.nonzero(g2glob < 0)[0]:
+            g2glob[g] = new_node(tuple(node_xy[g]))
+        tri_parts.append(g2glob[tri3])
+    tri3 = np.vstack(tri_parts)
 
     # Orientation directe des triangles
     P = np.array(coords)

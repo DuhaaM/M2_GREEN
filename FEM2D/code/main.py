@@ -1,20 +1,31 @@
 """Validation (solution manufacturée, étude de convergence) et cas d'application.
 
-Sections 6 et 7 de main.tex. Lancer :  python3 main.py
+Sections 6 et 7 de main.tex. Lancer :
+    python3 main.py                       menu : obstacles composés, validation ou tous les cas
+    python3 main.py puzzle                obstacle choisi directement (voir --help)
+    python3 main.py --step fichier.step   obstacle lu dans un fichier CAO
+    python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0
+                                          plusieurs obstacles, type choisi pour chacun
+    python3 main.py tous                  tous les cas en parallèle, sans validation du maillage
+Le maillage est affiché et doit être validé avant l'assemblage et la résolution.
 Les figures sont écrites dans le dossier resultats/ à côté de ce fichier.
 """
+import argparse
 import os
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
+from functools import partial
+from typing import Callable, Optional
 
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
 from matplotlib.collections import LineCollection
 from matplotlib.tri import Triangulation
 import numpy as np
 
 from assembly import compute_errors
-from geometry import Polygon, disk, domain_from_obstacle, from_step, peanut
+from geometry import MultiObstacle, Polygon, disk, domain_from_obstacle, from_step, peanut
 from mesh import build_mesh
 from solver import solve
 
@@ -106,7 +117,7 @@ def draw_beta(ax, mesh):
         ax.plot(pts[:, 0], pts[:, 1], "k", lw=1.2, zorder=4)
 
 
-def plot_mesh(mesh, path):
+def mesh_figure(mesh):
     fig, ax = plt.subplots(figsize=(8, 6))
     P = mesh.coords
     ax.add_collection(LineCollection(P[mesh.quad[:, [0, 1, 2, 3, 0]]], colors="0.55", lw=0.6))
@@ -116,6 +127,11 @@ def plot_mesh(mesh, path):
     draw_beta(ax, mesh)
     ax.set_aspect("equal")
     ax.set_title(f"Maillage : {len(mesh.quad)} quadrilatères Q2, {len(mesh.tri)} triangles P2")
+    return fig
+
+
+def plot_mesh(mesh, path):
+    fig = mesh_figure(mesh)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -146,12 +162,243 @@ def plot_convergence(hs, e_l2, e_h1, path):
     plt.close(fig)
 
 
+
+
 # ----------------------------------------------------------------------------
-# Programme principal
+# Cas d'application : obstacles disponibles
 # ----------------------------------------------------------------------------
-# Chaque cas tourne dans son propre processus : les fonctions ci-dessous sont définies
-# au niveau du module (les lambda ne passent pas d'un processus à l'autre) et renvoient
-# leur texte au lieu de l'afficher, pour que les sorties ne s'entremêlent pas.
+@dataclass(frozen=True)
+class MeshParams:
+    h: float = H
+    h_beta: float = H_BETA
+    delta: float = DELTA
+    m_beta: float = M_BETA
+
+    @property
+    def d_min(self):
+        """Distance minimale entre beta et le bord de Omega (section 3.5)."""
+        return self.m_beta + 4 * self.h
+
+
+@dataclass(frozen=True)
+class Case:
+    name: str
+    make: Callable                     # () -> obstacle, en coordonnées quelconques
+    suffix: str = ""                   # suffixe des figures maillage*.png, solution*.png
+    g_beta: Optional[Callable] = None  # (Lx, Ly) -> g_beta ; None : u = 0 sur dbeta
+
+
+# Fonctions du module (et non des lambda) : les cas passent d'un processus à l'autre
+def g_dirichlet(Lx, Ly):
+    return lambda x, y: 1 + x / Lx
+
+
+def g_polygon(Lx, Ly):
+    return lambda x, y: np.exp(0.1 * (x - y))
+
+
+def obstacles_eloignes():
+    """beta non connexe, composantes assez éloignées pour être dans des zones T distinctes."""
+    return MultiObstacle([disk((0.0, 0.0), 0.8),
+                          peanut((6.0, 1.0), 0.7, 0.35),
+                          Polygon([(1.0, 4.0), (1.0, 6.0), (2.0, 6.0), (2.0, 5.0), (4.0, 5.0), (4.0, 4.0)])])
+
+
+_PEANUT = partial(peanut, PEANUT["center"], PEANUT["r0"], PEANUT["eps"])
+CASES = {
+    "disque": Case("disque", partial(disk, DISK["center"], DISK["R"]), "_disque"),
+    "cacahuete": Case("cacahuète", _PEANUT),
+    "cacahuete_dirichlet": Case("cacahuète, u = g_beta = 1 + x/Lx sur dbeta", _PEANUT,
+                                "_dirichlet", g_dirichlet),
+    "polygone": Case("polygone", partial(Polygon, POLYGON), "_polygone", g_polygon),
+    "step": Case("fichier STEP", partial(from_step, STEP), "_step"),
+    "puzzle": Case("pièce de puzzle (Puzzle.step)", partial(from_step, PUZZLE), "_puzzle"),
+    "non_connexe": Case("beta non connexe (deux_obstacles.step)", partial(from_step, DEUX),
+                        "_non_connexe"),
+    "eloignes": Case("trois obstacles éloignés, u = g_beta = 1 + x/Lx sur dbeta",
+                     obstacles_eloignes, "_eloignes", g_dirichlet),
+}
+
+
+def step_file_case(path, scale=1.0):
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return Case(f"fichier {os.path.basename(path)}", partial(from_step, path, scale), f"_{stem}")
+
+
+# ----------------------------------------------------------------------------
+# beta composé : type et paramètres choisis pour chaque composante
+# ----------------------------------------------------------------------------
+# type -> (description, paramètres numériques, valeurs par défaut)
+KINDS = {
+    "disque": ("disque de centre (x, y) et de rayon R", ["x", "y", "R"], [0.0, 0.0, 1.0]),
+    "cacahuete": ("cacahuète r = r0 (1 + eps cos 2t), centre (x, y)", ["x", "y", "r0", "eps"],
+                  [0.0, 0.0, 0.8, 0.35]),
+    "polygone": ("polygone (en L par défaut) translaté de (x, y)", ["x", "y"], [0.0, 0.0]),
+    "fichier": ("fichier STEP / IGES / BREP translaté de (x, y)", ["x", "y", "echelle"], [0.0, 0.0, 1.0]),
+}
+L_SHAPE = tuple(v for xy in np.array(POLYGON) - POLYGON[0] for v in xy)
+
+
+def make_component(kind, *args):
+    """Composantes de beta décrites par (type, paramètres) : liste d'obstacles connexes.
+
+    disque x y R | cacahuete x y r0 eps | polygone x y [x1 y1 x2 y2 ...] | fichier chemin x y [echelle]
+    """
+    if kind == "fichier":
+        path, args = args[0], [float(a) for a in args[1:]]
+        x, y, scale = args + KINDS["fichier"][2][len(args):]
+        obstacle = from_step(path, scale).translated(np.array([x, y]))
+        return getattr(obstacle, "components", [obstacle])
+    args = [float(a) for a in args]
+    if kind == "disque":
+        x, y, R = args
+        return [disk((x, y), R)]
+    if kind == "cacahuete":
+        x, y, r0, eps = args
+        return [peanut((x, y), r0, eps)]
+    if kind == "polygone":
+        (x, y), vertices = args[:2], args[2:] or L_SHAPE
+        if len(vertices) % 2 or len(vertices) < 6:
+            raise ValueError("Polygone : au moins trois sommets x1 y1 x2 y2 x3 y3.")
+        return [Polygon(np.reshape(vertices, (-1, 2)) + (x, y))]
+    raise ValueError(f"Type d'obstacle inconnu : {kind} (choix : {', '.join(KINDS)}).")
+
+
+def compose(specs):
+    """beta = réunion des composantes décrites par specs, une suite de (type, *paramètres)."""
+    comps = [c for spec in specs for c in make_component(*spec)]
+    return comps[0] if len(comps) == 1 else MultiObstacle(comps)
+
+
+def composed_case(specs):
+    names = ", ".join(spec[0] for spec in specs)
+    return Case(f"obstacles composés ({names})", partial(compose, tuple(map(tuple, specs))), "_compose")
+
+
+def ask_component(k):
+    """Type et paramètres de l'obstacle k (Entrée : valeur par défaut)."""
+    while True:
+        kind = ask(f"Obstacle {k + 1} : type ({', '.join(KINDS)}) [disque] : ", "disque").lower()
+        if kind in KINDS:
+            break
+        print("Type inconnu.")
+    print(f"  {KINDS[kind][0]}")
+    spec = [kind]
+    if kind == "fichier":
+        while not os.path.isfile(path := os.path.expanduser(ask("  Chemin du fichier : "))):
+            print(f"  Fichier introuvable : {path}")
+        spec.append(path)
+    names, defaults = KINDS[kind][1], list(KINDS[kind][2])
+    defaults[0] = 4.0 * k  # obstacles placés côte à côte par défaut
+    for name, value in zip(names, defaults):
+        while True:
+            try:
+                spec.append(float(ask(f"  {name} [{value:g}] : ", str(value))))
+                break
+            except ValueError:
+                print("  Nombre attendu.")
+    if kind == "polygone":
+        while True:
+            answer = ask("  Sommets x1 y1 x2 y2 ... [L] : ")
+            try:
+                vertices = [float(v) for v in answer.replace(",", " ").split()]
+            except ValueError:
+                print("  Nombres attendus.")
+                continue
+            if not vertices or (len(vertices) % 2 == 0 and len(vertices) >= 6):
+                spec += vertices
+                break
+            print("  Au moins trois sommets (nombre pair de valeurs).")
+    return spec
+
+
+def preview_mesh(mesh, specs, previous=None):
+    """Affiche le maillage en cours de composition, sans bloquer (ferme l'aperçu précédent)."""
+    if previous is not None:
+        plt.close(previous)
+    fig = mesh_figure(mesh)
+    fig.axes[0].set_title(f"{len(specs)} obstacle(s) : {', '.join(spec[0] for spec in specs)}\n"
+                          + fig.axes[0].get_title())
+    if matplotlib.get_backend().lower() in NON_INTERACTIVE:
+        path = os.path.join(OUT, f"maillage_compose_{len(specs)}.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Maillage enregistré dans {path}")
+        return None
+    plt.show(block=False)
+    plt.pause(0.1)
+    return fig
+
+
+def ask_composed(params=MeshParams()):
+    """Obstacles ajoutés un par un ; le maillage est affiché après chaque ajout ou retrait."""
+    specs, fig = [], None
+    try:
+        while True:
+            answer = "a"
+            if specs:
+                answer = ask("[a] ajouter un obstacle, [r] retirer le dernier, [t] terminer [a] : ",
+                             "a").lower()[:1]
+            if answer == "t":
+                return composed_case(specs)
+            if answer == "r":
+                print(f"Obstacle {len(specs)} retiré.")
+                candidate = specs[:-1]
+            elif answer == "a":
+                candidate = specs + [ask_component(len(specs))]
+            else:
+                print("Choix invalide.")
+                continue
+            if not candidate:
+                specs = []
+                continue
+            try:
+                mesh, Lx, Ly = prepare(composed_case(candidate), params)
+            except ValueError as err:
+                print(f"Échec du maillage avec cet obstacle : {err}\nObstacle non ajouté.")
+                continue
+            specs = candidate
+            print(mesh_summary(mesh, Lx, Ly))
+            fig = preview_mesh(mesh, specs, fig)
+    finally:
+        if fig is not None:
+            plt.close(fig)
+
+
+def prepare(case, params):
+    """Omega construit autour de beta, puis maillage : (mesh, Lx, Ly)."""
+    obstacle, Lx, Ly, _ = domain_from_obstacle(case.make(), params.h, params.d_min, params.m_beta)
+    mesh = build_mesh(obstacle, Lx, Ly, params.h, params.h_beta, params.delta, params.m_beta)
+    return mesh, Lx, Ly
+
+
+def mesh_summary(mesh, Lx, Ly):
+    return (f"Omega = [0, {Lx:g}] x [0, {Ly:g}] : {mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, "
+            f"{len(mesh.quad)} quadrilatères, {len(mesh.bnd)} nœuds de bord")
+
+
+def compute(case, mesh, Lx, Ly):
+    """Assemblage, résolution pour f = 1 et figures, sur un maillage déjà construit."""
+    g_beta = case.g_beta(Lx, Ly) if case.g_beta else None
+    U = solve(mesh, lambda x, y: np.ones_like(x), g_beta)
+    plot_mesh(mesh, os.path.join(OUT, f"maillage{case.suffix}.png"))
+    title = "Solution $u_h$ pour $f = 1$" + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else "")
+    plot_solution(mesh, U, os.path.join(OUT, f"solution{case.suffix}.png"), title)
+    return f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}"
+
+
+def application(case, params=MeshParams()):
+    """Cas complet sans validation du maillage (mode « tous »)."""
+    mesh, Lx, Ly = prepare(case, params)
+    return "\n".join([f"\n=== Application : {case.name}, f = 1 ===",
+                      mesh_summary(mesh, Lx, Ly), compute(case, mesh, Lx, Ly)])
+
+
+# ----------------------------------------------------------------------------
+# Étude de convergence (section 6)
+# ----------------------------------------------------------------------------
+# Chaque pas h tourne dans son propre processus : les fonctions ci-dessous renvoient
+# leur résultat au lieu de l'afficher, pour que les sorties ne s'entremêlent pas.
 HS = [0.5, 0.25, 0.125, 0.0625]
 
 
@@ -181,51 +428,171 @@ def validation_report(results):
     plot_convergence(HS, e_l2, e_h1, os.path.join(OUT, "convergence.png"))
 
 
-def application(name, obstacle, suffix="", Lx=LX, Ly=LY, g_beta=None):
-    out = [f"\n=== Application : {name}, f = 1, Omega = [0, {Lx}] x [0, {Ly}] ==="]
-    mesh = build_mesh(obstacle, Lx, Ly, H, H_BETA, DELTA, M_BETA)
-    out.append(f"{mesh.n_nodes} nœuds, {len(mesh.tri)} triangles, {len(mesh.quad)} quadrilatères, "
-               f"{len(mesh.bnd)} nœuds de bord")
-    U = solve(mesh, lambda x, y: np.ones_like(x), g_beta)
-    out.append(f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}")
-    plot_mesh(mesh, os.path.join(OUT, f"maillage{suffix}.png"))
-    title = "Solution $u_h$ pour $f = 1$" + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else "")
-    plot_solution(mesh, U, os.path.join(OUT, f"solution{suffix}.png"), title)
-    return "\n".join(out)
+def _worker_init():
+    matplotlib.use("Agg")  # pas de fenêtre dans les processus de calcul
 
 
-def peanut_case(dirichlet=False):
-    cacahuete, Lx, Ly, _ = domain_from_obstacle(peanut(PEANUT["center"], PEANUT["r0"], PEANUT["eps"]),
-                                                H, D_MIN, M_BETA)
-    if dirichlet:
-        return application("cacahuète, u = g_beta = 1 + x/Lx sur dbeta", cacahuete, suffix="_dirichlet",
-                           Lx=Lx, Ly=Ly, g_beta=lambda x, y: 1 + x / Lx)
-    return application("cacahuète", cacahuete, Lx=Lx, Ly=Ly)
+def run_validation(ex):
+    # Le pas h le plus fin est le plus long : lancé en premier
+    return [ex.submit(validation_step, k, h) for k, h in reversed(list(enumerate(HS)))][::-1]
 
 
-def polygon_case():
-    polygon, Lx, Ly, _ = domain_from_obstacle(Polygon(POLYGON), H, D_MIN, M_BETA)
-    return application("polygone", polygon, suffix="_polygone", Lx=Lx, Ly=Ly,
-                       g_beta=lambda x, y: np.exp(0.1 * (x - y)))
-
-
-def step_case(path, name, suffix):
-    obstacle, Lx, Ly, _ = domain_from_obstacle(from_step(path), H, D_MIN, M_BETA)
-    return application(name, obstacle, suffix=suffix, Lx=Lx, Ly=Ly)
-
-
-if __name__ == "__main__":
-    os.makedirs(OUT, exist_ok=True)
-    with ProcessPoolExecutor() as ex:
-        # Le pas h le plus fin est le plus long : lancé en premier
-        val = [ex.submit(validation_step, k, h) for k, h in reversed(list(enumerate(HS)))][::-1]
-        apps = [ex.submit(peanut_case),
-                ex.submit(peanut_case, dirichlet=True),
-                ex.submit(polygon_case),
-                ex.submit(step_case, STEP, "fichier STEP", "_step"),
-                ex.submit(step_case, PUZZLE, "pièce de puzzle (Puzzle.step)", "_puzzle"),
-                ex.submit(step_case, DEUX, "beta non connexe (deux_obstacles.step)", "_non_connexe")]
+def run_all():
+    with ProcessPoolExecutor(initializer=_worker_init) as ex:
+        val = run_validation(ex)
+        apps = [ex.submit(application, case) for case in CASES.values()]
         validation_report([fut.result() for fut in val])
         for fut in apps:
             print(fut.result())
-    print(f"\nFigures écrites dans {OUT}")
+
+
+def run_convergence():
+    with ProcessPoolExecutor(initializer=_worker_init) as ex:
+        validation_report([fut.result() for fut in run_validation(ex)])
+
+
+# ----------------------------------------------------------------------------
+# Mode interactif : choix de l'obstacle, validation du maillage
+# ----------------------------------------------------------------------------
+NON_INTERACTIVE = {"agg", "pdf", "ps", "svg", "pgf", "cairo", "template"}
+
+
+def ask(prompt, default=""):
+    try:
+        answer = input(prompt).strip()
+    except EOFError:
+        if not default:  # entrée fermée et pas de réponse par défaut : la question boucherait
+            raise SystemExit("\nEntrée standard fermée.")
+        answer = ""
+    return answer or default
+
+
+MENU = {
+    "composer": "obstacles ajoutés un par un (disque, cacahuète, polygone, fichier CAO)",
+    "validation": "étude de convergence (disque, solution manufacturée)",
+    "tous": "tous les cas prédéfinis, sans validation du maillage",
+}
+
+
+def choose_case(params=MeshParams()):
+    """Menu : renvoie un Case, ou l'une des chaînes « validation », « tous »."""
+    choices = list(MENU)
+    for i, key in enumerate(choices, 1):
+        print(f"  {i:2d}. {key:<12} {MENU[key]}")
+    while True:
+        answer = ask("Choix (numéro ou nom) : ").lower()
+        if answer.isdigit() and 1 <= int(answer) <= len(choices):
+            answer = choices[int(answer) - 1]
+        if answer == "composer":
+            return ask_composed(params)
+        if answer in MENU:
+            return answer
+        print("Choix invalide.")
+
+
+def ask_params(params):
+    """Nouveaux paramètres de maillage (Entrée : valeur conservée)."""
+    values = {}
+    for name, value in vars(params).items():
+        while True:
+            answer = ask(f"  {name} [{value:g}] : ")
+            try:
+                values[name] = float(answer) if answer else value
+                break
+            except ValueError:
+                print("  Nombre attendu.")
+    return MeshParams(**values)
+
+
+def review_mesh(mesh, case):
+    """Affiche le maillage et renvoie True s'il est validé."""
+    path = os.path.join(OUT, f"maillage{case.suffix}.png")
+    fig = mesh_figure(mesh)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    if matplotlib.get_backend().lower() in NON_INTERACTIVE:
+        plt.close(fig)
+        print(f"Pas d'affichage disponible : maillage enregistré dans {path}")
+        return ask("Valider ce maillage ? [o/n] : ", "n").lower().startswith("o")
+
+    decision = {}
+
+    def decide(accepted):
+        decision["ok"] = accepted
+        plt.close(fig)
+
+    fig.subplots_adjust(bottom=0.14)
+    b_ok = Button(fig.add_axes([0.25, 0.02, 0.2, 0.06]), "Valider", color="#b8e0b8", hovercolor="#8fd08f")
+    b_no = Button(fig.add_axes([0.55, 0.02, 0.2, 0.06]), "Refuser", color="#f0b8b8", hovercolor="#e89090")
+    b_ok.on_clicked(lambda _: decide(True))
+    b_no.on_clicked(lambda _: decide(False))
+    print("Maillage affiché : cliquer sur « Valider » ou « Refuser ».")
+    plt.show()
+    if "ok" not in decision:  # fenêtre fermée sans cliquer
+        return ask("Valider ce maillage ? [o/n] : ", "n").lower().startswith("o")
+    return decision["ok"]
+
+
+def interactive(case, params, auto_accept=False):
+    """Maillage -> validation -> calcul. En cas de refus : autres paramètres ou autre obstacle."""
+    while True:
+        print(f"\n=== {case.name} : h = {params.h:g}, h_beta = {params.h_beta:g}, "
+              f"delta = {params.delta:g}, m_beta = {params.m_beta:g} ===")
+        try:
+            mesh, Lx, Ly = prepare(case, params)
+        except ValueError as err:
+            print(f"Échec du maillage : {err}")
+            accepted = False
+        else:
+            print(mesh_summary(mesh, Lx, Ly))
+            accepted = auto_accept or review_mesh(mesh, case)
+        if accepted:
+            print("Maillage validé : assemblage et résolution...")
+            print(compute(case, mesh, Lx, Ly))
+            return
+        answer = ask("Maillage refusé. [p] modifier les paramètres, [o] changer d'obstacle, "
+                     "[q] quitter : ", "q").lower()
+        if answer.startswith("p"):
+            params = ask_params(params)
+        elif answer.startswith("o"):
+            case = choose_case(params)
+            if isinstance(case, str):
+                return case
+        else:
+            return "quitter"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("obstacle", nargs="?", choices=list(CASES) + ["validation", "tous"],
+                        help="obstacle (sans argument : menu)")
+    parser.add_argument("--step", metavar="FICHIER", help="obstacle lu dans un fichier STEP / IGES / BREP")
+    parser.add_argument("--obstacle", nargs="+", action="append", metavar="TYPE", dest="components",
+                        help="composante de beta, à répéter : disque x y R | cacahuete x y r0 eps | "
+                             "polygone x y [x1 y1 ...] | fichier chemin x y [echelle]")
+    parser.add_argument("--echelle", type=float, default=1.0, help="facteur d'échelle du fichier CAO")
+    parser.add_argument("-y", "--oui", action="store_true", help="valider le maillage sans l'afficher")
+    for name, value in vars(MeshParams()).items():
+        parser.add_argument(f"--{name.replace('_', '-')}", type=float, default=value, dest=name)
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    os.makedirs(OUT, exist_ok=True)
+    params = MeshParams(args.h, args.h_beta, args.delta, args.m_beta)
+    if args.components:
+        choice = composed_case(args.components)
+    elif args.step:
+        choice = step_file_case(args.step, args.echelle)
+    elif args.obstacle:
+        choice = CASES.get(args.obstacle, args.obstacle)
+    else:
+        choice = choose_case(params)
+    if isinstance(choice, Case):
+        choice = interactive(choice, params, args.oui)
+    if choice == "validation":
+        run_convergence()
+    elif choice == "tous":
+        run_all()
+    if choice != "quitter":
+        print(f"\nFigures écrites dans {OUT}")

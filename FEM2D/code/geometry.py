@@ -164,9 +164,9 @@ class CurveObstacle:
 class MultiObstacle:
     """beta non connexe : réunion de composantes disjointes (Obstacle, Polygon, CurveObstacle).
 
-    build_mesh traite chaque composante comme un trou de la zone T. Les composantes
-    doivent être assez proches pour que la zone T les entoure toutes (un seul trou
-    dans Q), sinon inner_contour échoue.
+    build_mesh traite chaque composante comme un trou de la zone T. Des composantes
+    proches partagent une même zone T ; des composantes éloignées donnent plusieurs
+    trous dans Q, chacun triangulé séparément.
     """
 
     def __init__(self, components):

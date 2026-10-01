@@ -227,14 +227,29 @@ Le maillage se construit ainsi :
   \item \textbf{Sélection des cellules.} On garde les cellules de la grille
         dont les quatre sommets et le centre sont hors de $\beta$ et à
         distance au moins $m_\beta$ de $\beta$. On retire ensuite, jusqu'à
-        stabilisation, les cellules qui n'ont qu'une seule voisine (par une
-        arête), ainsi que les deux cellules d'un sommet qui ne se touchent
-        que par ce coin (sinon ce sommet serait partagé par quatre arêtes du
-        bord de $\mathcal{Q}$).
-  \item \textbf{Contour intérieur de $\mathcal{Q}$.} Les arêtes de la grille
-        qui appartiennent à une seule cellule de $\mathcal{Q}$ forment deux contours fermés :
-        $\partial\Omega$ et un contour polygonal autour de $\beta$, qui ne doit
-        pas toucher $\partial\Omega$. Les nœuds de ce contour sont imposés :
+        stabilisation :
+        \begin{itemize}
+          \item les îlots de cellules qui ne sont pas reliés (par des arêtes)
+                à la rangée de cellules le long de $\partial\Omega$, par
+                exemple des cellules enfermées entre plusieurs composantes de
+                $\beta$ : ils sont rendus à la zone $\mathcal{T}$, pour que
+                chaque trou de $\mathcal{Q}$ soit bordé par un seul contour
+                (composantes connexes calculées avec
+                \texttt{scipy.ndimage.label}) ;
+          \item les cellules qui n'ont qu'une seule voisine (par une arête) ;
+          \item les deux cellules d'un sommet qui ne se touchent que par ce
+                coin (sinon ce sommet serait partagé par quatre arêtes du bord
+                de $\mathcal{Q}$).
+        \end{itemize}
+  \item \textbf{Contours intérieurs de $\mathcal{Q}$.} Les cellules non
+        gardées forment un ou plusieurs \emph{trous} de $\mathcal{Q}$
+        (composantes connexes par les arêtes) ; chacun contient au moins une
+        composante de $\beta$ (section~\ref{sec:step}). Les arêtes de la grille
+        qui appartiennent à une seule cellule de $\mathcal{Q}$ forment
+        $\partial\Omega$ et un contour polygonal fermé autour de chaque trou,
+        qui ne doit pas toucher $\partial\Omega$ ; une arête est rattachée au
+        trou de la cellule non gardée qu'elle borde. Pour un obstacle connexe,
+        il y a un seul trou. Les nœuds de ces contours sont imposés :
         ce sont exactement les nœuds de la grille. Chacune de ses arêtes est
         donc commune à un quadrilatère et à un triangle, et le maillage est
         conforme : sur cette arête, les traces $Q_2$ et $P_2$ sont toutes deux
@@ -246,8 +261,10 @@ Le maillage se construit ainsi :
         la longueur $s(t)$ de $\gamma$ sur un échantillonnage fin, on
         choisit $n_\beta = \lceil s(2\pi)/h_\beta \rceil$ points, et on
         garde pour chacun son paramètre $t_i$ (obtenu en inversant $s$).
-  \item \textbf{Triangulation de $\mathcal{T}$.} On calcule une triangulation
-        de Delaunay contrainte par ces deux contours, avec une taille de
+  \item \textbf{Triangulation de $\mathcal{T}$.} Dans chaque trou de
+        $\mathcal{Q}$, on calcule une triangulation de Delaunay contrainte par
+        son contour et par le bord des composantes de $\beta$ qu'il contient
+        (repérées par la cellule où tombe un point de leur bord), avec une taille de
         maille cible
         \[
         h_{\mathrm{loc}}(x) = h_\beta + (h - h_\beta)\,\min\!\left(1, \frac{d(x,\beta)}{\delta}\right),
@@ -255,7 +272,8 @@ Le maillage se construit ainsi :
         où $d(x,\beta)$ est la distance à $\beta$ et $\delta$ la largeur de
         la zone de transition. Les mailles sont ainsi fines près de $\beta$,
         où la solution varie le plus, et de taille $h$ au raccord avec la
-        grille.
+        grille. Les trous sont triangulés séparément, par des appels
+        successifs à \texttt{gmsh}, et les triangles obtenus sont réunis.
   \item \textbf{Éléments isoparamétriques.} Pour chaque arête posée sur
         $\partial\beta$, entre deux points de paramètres $t_a$ et $t_b$, le
         nœud milieu $P_2$ est placé sur $\partial\beta$ en
@@ -291,8 +309,8 @@ construit une numérotation globale unique de la façon suivante :
         $0 \le i \le n_x$, $0 \le j \le n_y$, reçoit un numéro s'il est
         sommet d'au moins une cellule de $\mathcal{Q}$.
   \item \textbf{Sommets des triangles.} \texttt{gmsh} est appelé avec des
-        éléments d'ordre 1 (triangles à 3 nœuds). Chaque point des deux
-        contours est créé dans \texttt{gmsh} comme un point géométrique, et
+        éléments d'ordre 1 (triangles à 3 nœuds), une fois par trou de
+        $\mathcal{Q}$. Chaque point des contours est créé dans \texttt{gmsh} comme un point géométrique, et
         \texttt{gmsh} renvoie le nœud qui lui correspond : un nœud du
         contour intérieur de $\mathcal{Q}$ reprend le numéro du sommet de la
         grille, et un point de $\partial\beta$ reçoit un nouveau numéro en
@@ -686,10 +704,11 @@ x \in \beta \iff \exists\, c,\ x \in \beta_c .
 \]
 La construction du maillage change en deux points :
 \begin{itemize}
-  \item \textbf{Triangulation.} La zone $\mathcal{T}$ est limitée à
-        l'extérieur par le contour intérieur de $\mathcal{Q}$ et possède un
-        trou par composante : on transmet à \texttt{gmsh} les $p$ contours
-        $\partial\beta_c$.
+  \item \textbf{Triangulation.} Chaque trou de $\mathcal{Q}$ contient une ou
+        plusieurs composantes. La partie de $\mathcal{T}$ qui le remplit est
+        limitée à l'extérieur par le contour du trou et possède un trou par
+        composante qu'il contient : on transmet à \texttt{gmsh} ce contour et
+        les contours $\partial\beta_c$ correspondants.
   \item \textbf{Numérotation.} Un point de $\partial\beta$ est repéré par le
         couple $(c, k)$ : composante et indice dans la discrétisation de
         $\gamma_c$. Une arête est posée sur $\partial\beta$ si ses deux
@@ -700,23 +719,27 @@ La construction du maillage change en deux points :
 \end{itemize}
 Pour $p = 1$, on retrouve exactement le cas précédent.
 
-\paragraph{Limites.} Les composantes doivent être \emph{proches} : la
-méthode suppose toujours que $\mathcal{Q}$ n'a qu'un seul contour intérieur,
-donc que la zone $\mathcal{T}$ entoure toutes les composantes à la fois. Une
-cellule située entre deux composantes n'est gardée que si elle est à
-distance au moins $m_\beta$ de chacune, ce qui est impossible si leur écart
-est inférieur à $2 m_\beta$ environ. Si les composantes sont plus éloignées,
-des quadrilatères passent entre elles, $\mathcal{Q}$ a plusieurs trous et le
-code s'arrête avec un message d'erreur. Sont également refusés un $\beta$
-troué (une composante contient une autre) et deux faces qui se chevauchent.
+\paragraph{Composantes proches ou éloignées.} Une cellule située entre deux
+composantes n'est gardée que si elle est à distance au moins $m_\beta$ de
+chacune, ce qui est impossible si leur écart est inférieur à $2 m_\beta$
+environ. Des composantes \emph{proches} partagent donc un même trou de
+$\mathcal{Q}$, entouré par une seule zone $\mathcal{T}$. Si elles sont plus
+éloignées, des quadrilatères passent entre elles et $\mathcal{Q}$ a
+plusieurs trous, chacun triangulé séparément (étapes 2 et 4 de la
+section~\ref{sec:construction}). Les deux situations peuvent coexister. Si
+des cellules de $\mathcal{Q}$ sont enfermées entre plusieurs composantes,
+sans lien avec le bord de $\Omega$, elles sont retirées (étape 1) et le trou
+englobe tout le groupe. Sont refusés un $\beta$ troué (une composante
+contient une autre) et deux faces qui se chevauchent.
 
 \paragraph{Validation et exemple.} Pour deux disques
 $\beta_c = D(c_c, R_c)$, avec $c_1 = (2.5, 2.5)$, $R_1 = 0.7$,
 $c_2 = (4.6, 2.5)$, $R_2 = 0.6$, on prend la solution manufacturée
 $u = S\, g_1 g_2$, où $g_c(x) = |x - c_c|^2 - R_c^2$, qui s'annule sur les
 deux bords, et $f = -\Delta u + u$. L'écart entre les disques vaut $0.8$ :
-on fixe $m_\beta = 0.45$ pour tous les pas afin qu'ils restent proches (avec
-$m_\beta = 0.9\,h$, des quadrilatères passent entre eux dès $h = 0.25$). On
+on fixe $m_\beta = 0.45$ pour tous les pas afin qu'ils partagent toujours le
+même trou de $\mathcal{Q}$ (avec $m_\beta = 0.9\,h$, des quadrilatères
+passent entre eux dès $h = 0.25$ et la topologie du maillage change). On
 obtient encore les ordres optimaux :
 \begin{center}
 \begin{tabular}{ccccc}
@@ -736,6 +759,23 @@ $\Omega = [0, 9.5] \times [0, 7.5]$, 212 quadrilatères et 436 triangles :
 
 \begin{center}
 \includegraphics[width=0.7\textwidth]{code/resultats/maillage_non_connexe.png}
+\end{center}
+
+Pour des composantes éloignées, \texttt{code/main.py} réunit (classe
+\texttt{MultiObstacle}) un disque de centre $(0, 0)$ et de rayon $0.8$, une
+cacahuète de centre $(6, 1)$ ($r_0 = 0.7$, $\varepsilon = 0.35$) et le
+polygone en L de sommets
+\[
+(1, 4),\ (1, 6),\ (2, 6),\ (2, 5),\ (4, 5),\ (4, 4).
+\]
+Avec les paramètres par défaut, on obtient $\Omega = [0, 14] \times [0, 13]$,
+531 quadrilatères et 1048 triangles. Des quadrilatères passent entre le disque
+et les deux autres composantes : $\mathcal{Q}$ a deux trous, l'un autour du
+disque, l'autre autour de la cacahuète et du L, assez proches pour partager
+la même zone $\mathcal{T}$.
+
+\begin{center}
+\includegraphics[width=0.7\textwidth]{code/resultats/maillage_eloignes.png}
 \end{center}
 
 En Python, \texttt{from\_step(path, scale)} de \texttt{geometry.py} renvoie
@@ -1201,9 +1241,10 @@ imposée (ou mal évaluée) aux nœuds de $\partial\beta$.
 Une fois le code validé, on le lance sur l'obstacle en forme de cacahuète
 avec $f = 1$. Il n'y a pas de solution exacte : on vérifie seulement que
 $u_h$ est positive, nulle sur $\partial D$ et régulière. On fait de même pour
-l'obstacle polygonal (section~\ref{sec:polygone}) et pour les obstacles lus
-dans les fichiers STEP de \texttt{code/cao/} (section~\ref{sec:step}), y
-compris l'obstacle non connexe.
+le disque, l'obstacle polygonal (section~\ref{sec:polygone}), les obstacles
+lus dans les fichiers STEP de \texttt{code/cao/} (section~\ref{sec:step}), y
+compris l'obstacle non connexe, et les trois obstacles éloignés de la
+section~\ref{sec:step} (avec $g_\beta = 1 + x / L_x$ sur $\partial\beta$).
 
 Pour illustrer la condition non homogène, on reprend la cacahuète avec
 $f = 1$ et $g_\beta(x,y) = 1 + x / L_x$ sur $\partial\beta$ : $u_h$ doit
@@ -1246,7 +1287,8 @@ Module & Contenu \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
 \texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$, $R^K$, $M^K$, $F^K$, assemblage creux \\
 \texttt{solver.py}    & élimination des nœuds de $\mathcal{B}$ ($U_\mathcal{B} = G_\mathcal{B}$), résolution \\
-\texttt{main.py}      & cas de validation, étude de convergence, figures \\
+\texttt{main.py}      & cas de validation, étude de convergence, cas d'application, \\
+                      & ligne de commande, menu, validation du maillage, figures \\
 \texttt{cao/}         & fichiers STEP d'exemple et script \texttt{make\_obstacle.py} \\
 \hline
 \end{tabular}
@@ -1254,15 +1296,95 @@ Module & Contenu \\
 
 Dépendances : \texttt{numpy}, \texttt{scipy}, \texttt{gmsh}, \texttt{matplotlib}.
 
+\subsection{Utilisation de \texttt{main.py}}
+\label{sec:usage}
+
+\paragraph{Validation du maillage.} Pour un obstacle donné, le programme
+construit $\Omega$ autour de $\beta$ (section~\ref{sec:omega}, avec
+$d_{\min} = m_\beta + 4h$), puis le maillage, affiche le nombre de nœuds,
+de triangles et de quadrilatères, et montre le maillage dans une fenêtre
+avec deux boutons \og Valider \fg{} et \og Refuser \fg{}. L'assemblage et la
+résolution (pour $f = 1$) ne sont lancés qu'après validation. En cas de
+refus ou d'échec du maillage, on peut modifier les paramètres $h$,
+$h_\beta$, $\delta$, $m_\beta$ (Entrée conserve la valeur courante), changer
+d'obstacle ou quitter. Sans affichage disponible (\emph{backend}
+\texttt{matplotlib} non interactif), le maillage est écrit dans
+\texttt{resultats/} et la validation se fait au clavier.
+
+\paragraph{Ligne de commande.}
+\begin{center}
+\begin{tabular}{ll}
+\hline
+Commande & Effet \\
+\hline
+\texttt{python3 main.py} & menu (voir ci-dessous) \\
+\texttt{python3 main.py \textit{cas}} & cas prédéfini : \texttt{disque}, \texttt{cacahuete},
+                                        \texttt{cacahuete\_dirichlet}, \\
+                                      & \texttt{polygone}, \texttt{step}, \texttt{puzzle},
+                                        \texttt{non\_connexe}, \texttt{eloignes} \\
+\texttt{python3 main.py --step f.step} & obstacle lu dans un fichier STEP / IGES / BREP
+                                         (\texttt{--echelle}) \\
+\texttt{python3 main.py --obstacle \dots} & $\beta$ composé, option à répéter
+                                            pour chaque composante \\
+\texttt{python3 main.py validation} & étude de convergence (section~\ref{sec:validation}) \\
+\texttt{python3 main.py tous} & validation et tous les cas prédéfinis en parallèle, \\
+                              & sans validation du maillage \\
+\hline
+\end{tabular}
+\end{center}
+Les options \texttt{--h}, \texttt{--h-beta}, \texttt{--delta} et
+\texttt{--m-beta} changent les paramètres de maillage, et \texttt{-y}
+(\texttt{--oui}) valide le maillage sans l'afficher. Dans le mode
+\texttt{tous} et pour l'étude de convergence, chaque calcul tourne dans son
+propre processus (\texttt{ProcessPoolExecutor}), sans fenêtre.
+
+\paragraph{Obstacle composé.} $\beta$ peut être construit comme réunion de
+composantes dont on choisit le type et les paramètres :
+\begin{center}
+\begin{tabular}{ll}
+\hline
+Composante & Paramètres \\
+\hline
+\texttt{disque}    & centre $(x, y)$, rayon $R$ \\
+\texttt{cacahuete} & centre $(x, y)$, $r_0$, $\varepsilon$ \\
+\texttt{polygone}  & translation $(x, y)$, puis sommets $x_1\ y_1\ x_2\ y_2 \dots$
+                     (au moins trois ; L par défaut) \\
+\texttt{fichier}   & chemin d'un fichier CAO, translation $(x, y)$, échelle \\
+\hline
+\end{tabular}
+\end{center}
+Une composante lue dans un fichier peut elle-même être non connexe : toutes
+ses composantes sont ajoutées. Par exemple
+\[
+\texttt{python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0}
+\]
+réunit un disque de rayon $1$ et le polygone en L translaté de $(4, 0)$. Une
+seule composante donne un obstacle connexe, plusieurs un
+\texttt{MultiObstacle} (section~\ref{sec:step}), traité comme à la
+section~\ref{sec:construction} que les composantes soient proches ou
+éloignées.
+
+\paragraph{Menu.} Sans argument, le programme propose : \texttt{composer}
+(obstacles ajoutés un par un), \texttt{validation} ou \texttt{tous}. En mode
+\texttt{composer}, on choisit le type puis les paramètres de chaque
+composante (Entrée : valeur par défaut ; les composantes sont placées côte
+à côte par défaut, $x = 4k$ pour la $k$-ième). Après chaque ajout ou retrait,
+le maillage est recalculé et affiché sans bloquer (ou écrit dans
+\texttt{maillage\_compose\_$p$.png}, $p$ étant le nombre de composantes) ;
+une composante qui fait échouer le maillage n'est pas ajoutée. On termine
+avec \texttt{t}, puis le maillage final passe par la validation décrite
+ci-dessus.
+
 \subsection{Sorties}
 
 \begin{itemize}
   \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$
-        (\texttt{maillage\_polygone.png} pour l'obstacle polygonal,
-        \texttt{maillage\_step.png}, \texttt{maillage\_puzzle.png} et
-        \texttt{maillage\_non\_connexe.png} pour les obstacles STEP ; de même
-        pour \texttt{solution*.png}, et \texttt{solution\_dirichlet.png} pour
-        la cacahuète avec $u = g_\beta$ sur $\partial\beta$).
+        pour la cacahuète. Les autres cas ajoutent un suffixe :
+        \texttt{\_disque}, \texttt{\_dirichlet} (cacahuète avec
+        $u = g_\beta$ sur $\partial\beta$), \texttt{\_polygone},
+        \texttt{\_step}, \texttt{\_puzzle}, \texttt{\_non\_connexe},
+        \texttt{\_eloignes}, \texttt{\_compose} (obstacle composé) et le nom
+        du fichier pour \texttt{--step} ; de même pour \texttt{solution*.png}.
   \item \texttt{solution.png} : $u_h$ en couleurs. Pour l'affichage, chaque
         triangle $P_2$ est découpé en 4 sous-triangles et chaque carré $Q_2$
         en 8 à l'aide des nœuds milieux, puis on trace le résultat avec
