@@ -28,8 +28,8 @@ def geometry_at(X, G):
     return det, B
 
 
-def assemble(mesh, f):
-    """Assemble A = K + M (creuse, CSR) et le second membre F."""
+def assemble(mesh, f, k=1.0):
+    """Assemble A = R + k M (creuse, CSR), pour -Δu + k u = f, et le second membre F."""
     N = mesh.n_nodes
     rows, cols, vals = [], [], []
     F = np.zeros(N)
@@ -43,7 +43,7 @@ def assemble(mesh, f):
             det, B = geometry_at(X, ref.dpsi[:, :, q])
             xq = np.einsum("ekd,k->ed", X, psi)
             wd = ref.w[q] * det
-            Ae += wd[:, None, None] * (np.einsum("edk,edl->ekl", B, B) + np.outer(psi, psi))
+            Ae += wd[:, None, None] * (np.einsum("edk,edl->ekl", B, B) + k * np.outer(psi, psi))
             Fe += (wd * f(xq[:, 0], xq[:, 1]))[:, None] * psi[None, :]
         rows.append(np.repeat(conn, nloc, axis=1).ravel())
         cols.append(np.tile(conn, (1, nloc)).ravel())

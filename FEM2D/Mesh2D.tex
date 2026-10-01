@@ -29,19 +29,20 @@ précise pour qu'une IA puisse l'implémenter en Python.
 
 Soit $\Omega$ un rectangle et $\beta \subset \Omega$ un obstacle (défini à la
 section~\ref{sec:beta}). On pose $D = \Omega \setminus \beta$, dont le bord
-est $\partial D = \partial\Omega \cup \partial\beta$. Pour $f \in L^2(D)$
-et $g_\beta$ une fonction régulière définie au voisinage de $\partial\beta$,
-données, on souhaite résoudre le problème
+est $\partial D = \partial\Omega \cup \partial\beta$. Pour $k \ge 0$ une
+constante, $f \in L^2(D)$ et $g_\beta$ une fonction régulière définie au
+voisinage de $\partial\beta$, données, on souhaite résoudre le problème
 \[
 (P)\quad
 \begin{cases}
--\Delta u + u = f & \text{dans } D,\\[2pt]
+-\Delta u + k\, u = f & \text{dans } D,\\[2pt]
 u = 0 & \text{sur } \partial \Omega ,\\[2pt]
 u = g_\beta & \text{sur } \partial \beta .
 \end{cases}
 \]
 Le cas $g_\beta = 0$ correspond à la condition homogène $u = 0$ sur
-$\partial D$.
+$\partial D$. Le cas $k = 0$ est le problème de Poisson ; le code prend
+$k = 1$ par défaut.
 
 \section{Formulation variationnelle}
 
@@ -67,13 +68,13 @@ on intègre sur $D$. La formule de Green donne
 \]
 d'où
 \[
-\int_D -\Delta u \, v + \int_D u\, v
-= \int_D \nabla u \cdot \nabla v + \int_D u\, v .
+\int_D -\Delta u \, v + k \int_D u\, v
+= \int_D \nabla u \cdot \nabla v + k \int_D u\, v .
 \]
 Les fonctions test restent nulles sur tout $\partial D$ : seule l'inconnue
 $u$ porte la condition $u = g_\beta$. On définit
 \begin{align*}
-a(u, v) &= \int_D \nabla u \cdot \nabla v + \int_D u\, v,\\
+a(u, v) &= \int_D \nabla u \cdot \nabla v + k \int_D u\, v,\\
 \ell(v) &= \int_D f\, v.
 \end{align*}
 
@@ -116,30 +117,38 @@ coercive sur $V$ et $\ell$ une forme linéaire continue sur $V$. Alors il
 existe un unique $u \in V$ tel que $a(u,v) = \ell(v)$ pour tout $v \in V$.
 \end{theoreme}
 
-Ici $a$ est exactement le produit scalaire de $H^1(D)$. Par l'inégalité de
-Cauchy--Schwarz,
+Par l'inégalité de Cauchy--Schwarz,
 \[
-|a(u,v)| \le \|u\|_{H^1} \|v\|_{H^1},
-\qquad
-a(v,v) = \|v\|_{H^1}^2,
+|a(u,v)| \le M \|u\|_{H^1} \|v\|_{H^1},
+\quad M = \max(1, k),
 \qquad
 |\ell(v)| \le \|f\|_{L^2} \|v\|_{H^1} .
 \]
-$a$ est donc continue et coercive (de constante $1$) et $\ell$ est continue,
-de même que $v \mapsto \ell(v) - a(u_g, v)$. Le théorème s'applique à
+Pour la coercivité, si $k > 0$, $a(v,v) = \|\nabla v\|_{L^2}^2 +
+k\|v\|_{L^2}^2 \ge \min(1, k)\, \|v\|_{H^1}^2$. Si $k = 0$, on utilise
+l'inégalité de Poincaré sur $V = H^1_0(D)$ ($D$ est borné) :
+$\|v\|_{L^2} \le C_P \|\nabla v\|_{L^2}$, d'où
+$a(v,v) = \|\nabla v\|_{L^2}^2 \ge \|v\|_{H^1}^2 / (1 + C_P^2)$. Dans
+les deux cas $a(v,v) \ge \alpha \|v\|_{H^1}^2$ avec $\alpha > 0$ : $a$ est
+continue et coercive, et $\ell$ est continue, de même que
+$v \mapsto \ell(v) - a(u_g, v)$. Le théorème s'applique à
 $u_0 \in V$ et à $u_h - u_{g,h} \in V_h$ : $(P_V)$ et $(P_h)$ ont chacun une
 unique solution.
 
 \paragraph{Estimation d'erreur (lemme de Céa).} En retranchant $(P_h)$ à
 $(P_V)$ avec $v = v_h$, on obtient $a(u - u_h, v_h) = 0$ pour tout
-$v_h \in V_h$. Soit $w_h \in V_{g,h}$ : comme $u_h - w_h \in V_h$,
+$v_h \in V_h$. La forme $a$ étant symétrique et coercive, elle définit un
+produit scalaire sur $H^1_0(D)$, de norme associée
+$\|v\|_a = a(v,v)^{1/2}$ (norme d'énergie). Soit $w_h \in V_{g,h}$ : comme
+$u_h - w_h \in V_h$,
 \[
-\|u - u_h\|_{H^1}^2 = a(u - u_h, u - w_h) + a(u - u_h, w_h - u_h)
-= a(u - u_h, u - w_h) \le \|u - u_h\|_{H^1}\, \|u - w_h\|_{H^1},
+\|u - u_h\|_a^2 = a(u - u_h, u - w_h) + a(u - u_h, w_h - u_h)
+= a(u - u_h, u - w_h) \le \|u - u_h\|_a\, \|u - w_h\|_a,
 \]
-donc
+donc $\|u - u_h\|_a = \min_{w_h \in V_{g,h}} \|u - w_h\|_a$, et avec
+$\alpha \|v\|_{H^1}^2 \le \|v\|_a^2 \le M \|v\|_{H^1}^2$,
 \[
-\|u - u_h\|_{H^1} = \min_{w_h \in V_{g,h}} \|u - w_h\|_{H^1} .
+\|u - u_h\|_{H^1} \le \sqrt{M / \alpha}\, \min_{w_h \in V_{g,h}} \|u - w_h\|_{H^1} .
 \]
 L'erreur ne dépend donc que de la capacité de $V_{g,h}$ à approcher $u$.
 L'interpolée nodale $I_h u$ appartient à $V_{g,h}$, puisque
@@ -500,7 +509,7 @@ qui s'annule sur $\partial\beta$ (ainsi que sur les prolongements des côtés,
 ce qui ne gêne pas). On a $\nabla g = \big(X' Y,\ X Y'\big)$ avec
 $X' = 2x - x_0 - x_1$, $Y' = 2y - y_0 - y_1$, et $\Delta g = 2(X + Y)$, d'où
 \[
-f = (1 + a^2 + b^2)\, S\, g - 2\, \nabla S \cdot \nabla g - S\, \Delta g .
+f = (k + a^2 + b^2)\, S\, g - 2\, \nabla S \cdot \nabla g - S\, \Delta g .
 \]
 Cette solution est régulière : elle ne présente pas de singularité aux coins,
 et l'on doit observer les ordres optimaux même sans raffinement aux coins.
@@ -736,7 +745,7 @@ contient une autre) et deux faces qui se chevauchent.
 $\beta_c = D(c_c, R_c)$, avec $c_1 = (2.5, 2.5)$, $R_1 = 0.7$,
 $c_2 = (4.6, 2.5)$, $R_2 = 0.6$, on prend la solution manufacturée
 $u = S\, g_1 g_2$, où $g_c(x) = |x - c_c|^2 - R_c^2$, qui s'annule sur les
-deux bords, et $f = -\Delta u + u$. L'écart entre les disques vaut $0.8$ :
+deux bords, et $f = -\Delta u + k\, u$. L'écart entre les disques vaut $0.8$ :
 on fixe $m_\beta = 0.45$ pour tous les pas afin qu'ils partagent toujours le
 même trou de $\mathcal{Q}$ (avec $m_\beta = 0.9\,h$, des quadrilatères
 passent entre eux dès $h = 0.25$ et la topologie du maillage change). On
@@ -935,7 +944,7 @@ u_h = \sum_{j=1}^{N} U_j\, \varphi_j ,
 En prenant $v_h = \varphi_i$ dans $(P_h)$ pour $i = 1,\dots,N$, on obtient
 le système linéaire
 \[
-\boxed{\ A\,U = F, \qquad A = R + M\ }
+\boxed{\ A\,U = F, \qquad A = R + k\, M\ }
 \]
 avec
 \[
@@ -946,8 +955,11 @@ M_{ij} = \int_D \varphi_j\, \varphi_i ,
 F_i = \int_D f\, \varphi_i .
 \]
 $R$ est la matrice de rigidité, $M$ la matrice de masse et $F$ le second
-membre. On a $A_{ij} = a(\varphi_j, \varphi_i)$ : $A$ est donc symétrique
-définie positive.
+membre. On a $A_{ij} = a(\varphi_j, \varphi_i)$ : $A$ est donc symétrique,
+et sa restriction aux nœuds intérieurs est définie positive par coercivité
+de $a$ (pour $k = 0$, $A = R$ seule est singulière : les constantes sont
+dans son noyau, et ce sont les conditions de Dirichlet qui la rendent
+inversible).
 
 \subsection{Fonctions de base $P_2$ et $Q_2$ sur les éléments de référence}
 \label{sec:bases}
@@ -1053,7 +1065,7 @@ M^K = \sum_{q} w_q\, d_q\, \Psi_q \Psi_q^{\top} ,
 F^K = \sum_{q} w_q\, d_q\, f\big(\Phi_K(\hat{x}_q)\big)\, \Psi_q ,
 \]
 avec $R^K, M^K \in \mathbb{R}^{n_K \times n_K}$ symétriques et
-$F^K \in \mathbb{R}^{n_K}$. On pose $A^K = R^K + M^K$.
+$F^K \in \mathbb{R}^{n_K}$. On pose $A^K = R^K + k\, M^K$.
 
 \paragraph{Cas des carrés de la grille.} Pour une cellule de côté $h$,
 $J_q = \tfrac{h}{2} I$ et $d_q = \tfrac{h^2}{4}$ en tout point. On obtient
@@ -1153,7 +1165,7 @@ Nom & Taille & Contenu \\
 \texttt{bnd}    & $|\mathcal{B}|$ & indices des nœuds de $\partial\Omega \cup \partial\beta$ \\
 \texttt{bnd\_beta} & $|\mathcal{B}_\beta|$ & indices des nœuds de $\partial\beta$ (sous-ensemble de \texttt{bnd}) \\
 $A^K$, $F^K$    & $n_K \times n_K$, $n_K$ & matrice et vecteur élémentaires \\
-$A$             & $N \times N$ (creuse) & $R + M$ assemblée \\
+$A$             & $N \times N$ (creuse) & $R + k\, M$ assemblée \\
 $F$             & $N$ & second membre assemblé \\
 $U$             & $N$ & valeurs de $u_h$ aux nœuds \\
 \hline
@@ -1194,8 +1206,8 @@ $\partial\beta$ ; $S$ n'est pas nulle sur $\partial\beta$ puisque $\beta$ est
 \]
 et, avec $\Delta S = -(a^2 + b^2) S$ et $\Delta \phi = 4$,
 \[
-f = -\Delta u_{\mathrm{ex}} + u_{\mathrm{ex}}
-= (1 + a^2 + b^2)\, S\, (\phi + 1)
+f = -\Delta u_{\mathrm{ex}} + k\, u_{\mathrm{ex}}
+= (k + a^2 + b^2)\, S\, (\phi + 1)
 - 4\big[ a (x - c_x) \cos(a x)\sin(b y) + b (y - c_y) \sin(a x)\cos(b y) \big]
 - 4 S .
 \]
@@ -1345,7 +1357,10 @@ Commande & Effet \\
 \end{tabular}
 \end{center}
 Les options \texttt{--h}, \texttt{--h-beta}, \texttt{--delta} et
-\texttt{--m-beta} changent les paramètres de maillage, et \texttt{-y}
+\texttt{--m-beta} changent les paramètres de maillage, \texttt{--k} le
+coefficient $k \ge 0$ de l'équation (1 par défaut ; pour une autre valeur,
+les figures de solution et de validation prennent le suffixe
+\texttt{\_k<valeur>}), et \texttt{-y}
 (\texttt{--oui}) valide le maillage sans l'afficher. Dans le mode
 \texttt{tous} et pour l'étude de convergence, chaque calcul tourne dans son
 propre processus (\texttt{ProcessPoolExecutor}), sans fenêtre.
