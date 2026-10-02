@@ -15,8 +15,9 @@ Sections 6 et 7 de main.tex. Lancer :
 Le maillage est affiché et doit être validé avant l'assemblage et la résolution ; la source f
 (celle du cas, ou une gaussienne f(x0, y0) = 1) se choisit en cliquant (x0, y0) sur le maillage,
 ou à défaut au terminal après validation.
-Les figures sont écrites dans le dossier resultats/ à côté de ce fichier
-(suffixe _k<valeur> pour les solutions et la validation si k n'est pas 1).
+Les figures sont écrites dans le dossier resultats/ à côté de ce fichier, un sous-dossier par
+obstacle (maillage.png, solution*.png), plus resultats/validation/ ; suffixe _k<valeur> pour les
+solutions et la validation si k n'est pas 1.
 """
 import argparse
 import hashlib
@@ -42,6 +43,13 @@ from mesh import build_mesh
 from solver import solve
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultats")
+
+
+def out_path(folder, name):
+    """Chemin de la figure name dans resultats/<folder>/, dossier créé au besoin."""
+    os.makedirs(os.path.join(OUT, folder), exist_ok=True)
+    return os.path.join(OUT, folder, name)
+
 
 # Paramètres par défaut (section 7.1)
 LX, LY = 7.0, 5.0
@@ -194,7 +202,8 @@ class MeshParams:
 class Case:
     name: str
     make: Callable                     # () -> obstacle, en coordonnées quelconques
-    suffix: str = ""                   # suffixe des figures maillage*.png, solution*.png
+    folder: str                        # sous-dossier de resultats/ (un par obstacle)
+    suffix: str = ""                   # suffixe des figures solution*.png (variante du cas)
     g_beta: Optional[Callable] = None  # (Lx, Ly) -> g_beta ; None : u = 0 sur dbeta
     f: Optional[Callable] = None       # (Lx, Ly) -> (f, titre LaTeX) ; None : f = 1
 
@@ -220,7 +229,7 @@ def f_gauss(Lx, Ly, sigma=SIGMA, center=None):
 
 
 def with_gauss(case, x0, y0, sigma=SIGMA):
-    """Le même cas avec f gaussienne centrée en (x0, y0) ; suffixe des figures complété."""
+    """Le même cas avec f gaussienne centrée en (x0, y0) ; suffixe de la solution complété."""
     return replace(case, f=partial(f_gauss, sigma=sigma, center=(x0, y0)),
                    suffix=f"{case.suffix}_gauss_{x0:g}_{y0:g}_s{sigma:g}")
 
@@ -234,28 +243,28 @@ def obstacles_eloignes():
 
 _PEANUT = partial(peanut, PEANUT["center"], PEANUT["r0"], PEANUT["eps"])
 CASES = {
-    "disque": Case("disque", partial(disk, DISK["center"], DISK["R"]), "_disque"),
-    "cacahuete": Case("cacahuète", _PEANUT),
+    "disque": Case("disque", partial(disk, DISK["center"], DISK["R"]), "disque"),
+    "cacahuete": Case("cacahuète", _PEANUT, "cacahuete"),
     "cacahuete_dirichlet": Case("cacahuète, u = g_beta = 1 + x/Lx sur dbeta", _PEANUT,
-                                "_dirichlet", g_dirichlet),
-    "polygone": Case("polygone", partial(Polygon, POLYGON), "_polygone", g_polygon),
-    "step": Case("fichier STEP", partial(from_step, STEP), "_step"),
-    "puzzle": Case("pièce de puzzle (Puzzle.step)", partial(from_step, PUZZLE), "_puzzle"),
+                                "cacahuete", "_dirichlet", g_dirichlet),
+    "polygone": Case("polygone", partial(Polygon, POLYGON), "polygone", g_beta=g_polygon),
+    "step": Case("fichier STEP", partial(from_step, STEP), "step"),
+    "puzzle": Case("pièce de puzzle (Puzzle.step)", partial(from_step, PUZZLE), "puzzle"),
     "puzzle_gauss": Case("pièce de puzzle (Puzzle.step), f gaussienne", partial(from_step, PUZZLE),
-                         "_puzzle_gauss", f=f_gauss),
+                         "puzzle", "_gauss", f=f_gauss),
     "non_connexe": Case("beta non connexe (deux_obstacles.step)", partial(from_step, DEUX),
-                        "_non_connexe"),
+                        "non_connexe"),
     "eloignes": Case("trois obstacles éloignés, u = g_beta = 1 + x/Lx sur dbeta",
-                     obstacles_eloignes, "_eloignes", g_dirichlet),
+                     obstacles_eloignes, "eloignes", g_beta=g_dirichlet),
 }
 
 
 def step_file_case(path, scale=1.0):
-    """Suffixe = nom du fichier en minuscules (Puzzle.step -> _puzzle, comme le cas prédéfini),
+    """Dossier = nom du fichier en minuscules (Puzzle.step -> puzzle, comme le cas prédéfini),
     suivi de l'échelle si elle n'est pas 1."""
     stem = os.path.splitext(os.path.basename(path))[0].lower()
-    suffix = f"_{stem}" + (f"_x{scale:g}" if scale != 1 else "")
-    return Case(f"fichier {os.path.basename(path)}", partial(from_step, path, scale), suffix)
+    folder = stem + (f"_x{scale:g}" if scale != 1 else "")
+    return Case(f"fichier {os.path.basename(path)}", partial(from_step, path, scale), folder)
 
 
 # ----------------------------------------------------------------------------
@@ -335,13 +344,13 @@ def compose(specs):
 
 
 def composed_case(specs):
-    """Suffixe _compose_<types>_<empreinte des paramètres> : deux compositions distinctes
+    """Dossier compose/<types>_<empreinte des paramètres> : deux compositions distinctes
     n'écrivent pas dans les mêmes figures."""
     specs = tuple(tuple(spec) for spec in specs)
     kinds = [spec[0] for spec in specs]
     digest = hashlib.sha1(repr(specs).encode()).hexdigest()[:6]
     return Case(f"obstacles composés ({', '.join(kinds)})", partial(compose, specs),
-                f"_compose_{'_'.join(kinds)}_{digest}")
+                os.path.join("compose", f"{'_'.join(kinds)}_{digest}"))
 
 
 def ask_component(k):
@@ -389,7 +398,7 @@ def preview_mesh(mesh, specs, previous=None):
     fig.axes[0].set_title(f"{len(specs)} obstacle(s) : {', '.join(spec[0] for spec in specs)}\n"
                           + fig.axes[0].get_title())
     if matplotlib.get_backend().lower() in NON_INTERACTIVE:
-        path = os.path.join(OUT, f"maillage_compose_{len(specs)}.png")
+        path = out_path("compose", f"apercu_{len(specs)}.png")
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"  Maillage enregistré dans {path}")
@@ -456,10 +465,10 @@ def compute(case, mesh, Lx, Ly, k=K):
     g_beta = case.g_beta(Lx, Ly) if case.g_beta else None
     f, f_title = case.f(Lx, Ly) if case.f else (lambda x, y: np.ones_like(x), "$f = 1$")
     U = solve(mesh, f, g_beta, k)
-    plot_mesh(mesh, os.path.join(OUT, f"maillage{case.suffix}.png"))
+    plot_mesh(mesh, out_path(case.folder, "maillage.png"))
     title = (f"Solution $u_h$ pour {f_title}" + (f", $k = {k:g}$" if k != K else "")
              + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else ""))
-    plot_solution(mesh, U, os.path.join(OUT, f"solution{case.suffix}{k_suffix(k)}.png"), title)
+    plot_solution(mesh, U, out_path(case.folder, f"solution{case.suffix}{k_suffix(k)}.png"), title)
     return f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}"
 
 
@@ -508,7 +517,7 @@ def validation_step(i, h, k=K):
     mesh, U, errs = validation_problem(h, k)
     l2, h1 = total_errors(errs)
     if i == 0:
-        plot_solution(mesh, U, os.path.join(OUT, f"validation_solution{k_suffix(k)}.png"),
+        plot_solution(mesh, U, out_path("validation", f"solution{k_suffix(k)}.png"),
                       f"Validation : $u_h$ pour $h = {h}$, $k = {k:g}$")
     return mesh.n_nodes, l2, h1, element_error_stats(errs)
 
@@ -531,7 +540,7 @@ def validation_report(results, k=K):
             if name in stats:
                 n, m_l2, s_l2, m_h1, s_h1 = stats[name]
                 print(f"{h:8.4f} {label:>4} {n:7d} {m_l2:11.3e} {s_l2:11.3e} {m_h1:11.3e} {s_h1:11.3e}")
-    plot_convergence(HS, e_l2, e_h1, os.path.join(OUT, f"convergence{k_suffix(k)}.png"))
+    plot_convergence(HS, e_l2, e_h1, out_path("validation", f"convergence{k_suffix(k)}.png"))
 
 
 def _worker_init():
@@ -640,7 +649,7 @@ def show_errors(h, k=K):
     marker = ax.add_patch(MplPolygon(polys[0], fill=False, ec="cyan", lw=2, zorder=5, visible=False))
     info = fig.text(0.16, 0.02, "", fontsize=8, family="monospace")
 
-    path = os.path.join(OUT, f"erreurs_elements{k_suffix(k)}.png")
+    path = out_path("validation", f"erreurs_elements{k_suffix(k)}.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     if matplotlib.get_backend().lower() in NON_INTERACTIVE:
         plt.close(fig)
@@ -728,7 +737,7 @@ def ask_params(params):
 def review_mesh(mesh, case, pick=False, sigma=SIGMA):
     """Affiche le maillage et renvoie (validé, centre). Si pick, un clic gauche dans Omega choisit
     le centre (x0, y0) de la source gaussienne (clic droit : annulé) ; centre = None sinon."""
-    path = os.path.join(OUT, f"maillage{case.suffix}.png")
+    path = out_path(case.folder, "maillage.png")
     fig = mesh_figure(mesh)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     if matplotlib.get_backend().lower() in NON_INTERACTIVE:
