@@ -277,7 +277,9 @@ Le maillage se construit ainsi :
         fonctionne pour un $\beta$ non convexe. En pratique, on calcule
         la longueur $s(t)$ de $\gamma$ sur un échantillonnage fin, on
         choisit $n_\beta = \lceil s(2\pi)/h_\beta \rceil$ points, et on
-        garde pour chacun son paramètre $t_i$ (obtenu en inversant $s$).
+        garde pour chacun son paramètre $t_i$ (obtenu en inversant $s$). Le
+        raffinement de la section~\ref{sec:raffinement} rend ce pas variable
+        près des coins singuliers et des interstices.
   \item \textbf{Triangulation de $\mathcal{T}$.} Dans chaque trou de
         $\mathcal{Q}$, on calcule une triangulation de Delaunay contrainte par
         son contour et par le bord des composantes de $\beta$ qu'il contient
@@ -291,6 +293,8 @@ Le maillage se construit ainsi :
         où la solution varie le plus, et de taille $h$ au raccord avec la
         grille. Les trous sont triangulés séparément, par des appels
         successifs à \texttt{gmsh}, et les triangles obtenus sont réunis.
+        Avec le raffinement de la section~\ref{sec:raffinement}, la taille
+        transmise à \texttt{gmsh} est $\min(h_{\mathrm{loc}}, h_r)$.
   \item \textbf{Éléments isoparamétriques.} Pour chaque arête posée sur
         $\partial\beta$, entre deux points de paramètres $t_a$ et $t_b$, le
         nœud milieu $P_2$ est placé sur $\partial\beta$ en
@@ -454,10 +458,11 @@ en $(3, 2.5)$ ($\alpha_j = 3\pi/2$). Le domaine $\Omega$ est construit
 autour de $\beta$ comme à la section~\ref{sec:omega}, avec
 $d_{\min} = m_\beta + 4h = 3$ (qui vérifie bien $d_{\min} \ge m_\beta + h$) :
 on obtient $\Omega = [0,9] \times [0,8]$, l'obstacle étant translaté de
-$(1, 1.5)$. Le maillage compte 216 quadrilatères et 433 triangles, sans
-raffinement aux coins. Les sommets du polygone sont bien
-des nœuds du maillage, et toutes les arêtes posées sur $\partial\beta$ sont
-droites.
+$(1, 1.5)$. Le maillage compte 216 quadrilatères et 1279 triangles, avec le
+raffinement a priori de la section~\ref{sec:raffinement} (433 triangles
+sans) : les cinq coins saillants sont raffinés, pas le coin rentrant. Les
+sommets du polygone sont bien des nœuds du maillage, et toutes les arêtes
+posées sur $\partial\beta$ sont droites.
 
 \begin{center}
 \includegraphics[width=0.85\textwidth]{code/resultats/polygone/maillage.png}
@@ -502,8 +507,12 @@ $\mu < \lambda / k$, soit $\mu < 1/3$ pour un carré (on prend par exemple
 $\mu = 1/4$). La taille minimale $h_{\min}$, de l'ordre de $h^{1/\mu}$,
 évite une taille nulle au sommet. Le nombre de mailles reste de l'ordre de
 $h^{-2}$ et on retrouve $O(h^2)$ en norme $H^1$ et $O(h^3)$ en norme $L^2$.
-Il suffit de transmettre $h_{\mathrm{loc}}^{\mathrm{coin}}$ à \texttt{gmsh}
-à la place de $h_{\mathrm{loc}}$ ; le reste du code est inchangé.
+Il suffirait de transmettre $h_{\mathrm{loc}}^{\mathrm{coin}}$ à
+\texttt{gmsh} à la place de $h_{\mathrm{loc}}$, et de répartir les nœuds de
+$\partial\beta$ selon cette taille. Le code implémente une version plus
+simple, avec une taille fixe au coin et une croissance linéaire
+(section~\ref{sec:raffinement}) : elle réduit nettement l'erreur, mais ne
+restaure pas l'ordre optimal.
 
 \paragraph{Validation.} Pour un obstacle rectangulaire
 $\beta = [x_0, x_1] \times [y_0, y_1]$, on garde la solution manufacturée de
@@ -698,8 +707,10 @@ $0.0625$ & $2.04 \cdot 10^{-5}$ & $2.98$ & $2.52 \cdot 10^{-3}$ & $1.98$ \\
 courbes. Avec les paramètres par défaut et $d_{\min} = m_\beta + 4h = 3$,
 \texttt{code/main.py} donne respectivement $\Omega = [0, 9] \times [0, 8]$
 (214 quadrilatères, 426 triangles) et $\Omega = [0, 9.5] \times [0, 8]$
-(220 quadrilatères, 518 triangles). Les coins sont des nœuds du maillage et
-les arcs sont suivis par des arêtes courbes.
+(220 quadrilatères, 1552 triangles, dont l'essentiel près des huit coins
+saillants raffinés, section~\ref{sec:raffinement} ; 518 triangles sans
+raffinement). Les coins sont des nœuds du maillage et les arcs sont suivis
+par des arêtes courbes.
 
 \begin{center}
 \includegraphics[width=0.48\textwidth]{code/resultats/step/maillage.png}
@@ -757,7 +768,9 @@ courbe, il peut se retourner : par exemple, pour deux disques de rayon $1$
 séparés de $0.005$, avec $h_\beta = 0.15$, deux triangles ont
 $\det D\Phi_T < 0$ en un point de quadrature. Le maillage est alors refusé avec
 la position des éléments fautifs ; diviser $h_\beta$ par deux (flèche
-$h_\beta^2 / 8R$ divisée par quatre) suffit dans cet exemple.
+$h_\beta^2 / 8R$ divisée par quatre) suffit dans cet exemple. Le raffinement
+a priori (section~\ref{sec:raffinement}, actif par défaut) règle aussi le
+problème, en ne raffinant que l'interstice.
 
 \paragraph{Validation et exemple.} Pour deux disques
 $\beta_c = D(c_c, R_c)$, avec $c_1 = (2.5, 2.5)$, $R_1 = 0.7$,
@@ -796,7 +809,7 @@ polygone en L de sommets
 (1, 4),\ (1, 6),\ (2, 6),\ (2, 5),\ (4, 5),\ (4, 4).
 \]
 Avec les paramètres par défaut, on obtient $\Omega = [0, 14] \times [0, 13]$,
-531 quadrilatères et 1048 triangles. Des quadrilatères passent entre le disque
+531 quadrilatères et 1910 triangles (1048 sans raffinement aux coins du L). Des quadrilatères passent entre le disque
 et les deux autres composantes : $\mathcal{Q}$ a deux trous, l'un autour du
 disque, l'autre autour de la cacahuète et du L, assez proches pour partager
 la même zone $\mathcal{T}$.
@@ -813,6 +826,228 @@ fichier STEP depuis Python, on construit la géométrie avec
 \texttt{gmsh.model.occ} (\texttt{addDisk}, \texttt{addRectangle},
 \texttt{addBSpline}, opérations booléennes\dots) puis on l'écrit avec
 \texttt{gmsh.write("obstacle.step")}.
+
+\subsection{Raffinement a priori près de $\beta$}
+\label{sec:raffinement}
+
+La taille $h_{\mathrm{loc}}$ de la section~\ref{sec:construction} ne dépend
+que de la distance à $\beta$ : le pas vaut $h_\beta$ partout sur
+$\partial\beta$. Deux situations demandent des mailles plus fines, et se
+repèrent sur la géométrie seule, avant tout calcul :
+\begin{itemize}
+  \item les \textbf{coins singuliers}, où l'angle de $D$ dépasse $\pi$ et où
+        le gradient de $u$ est infini (section~\ref{sec:polygone}) ;
+  \item les \textbf{interstices}, où deux parties de $\partial\beta$ sont
+        séparées par une bande de $D$ de largeur $d < h_\beta$ : un seul
+        triangle, très aplati, occupe la largeur, et il peut se retourner
+        s'il a une arête courbe (section~\ref{sec:step}).
+\end{itemize}
+Le module \texttt{sizing.py} définit près de ces zones une taille réduite,
+appliquée à la discrétisation de $\partial\beta$ et à la triangulation de
+$\mathcal{T}$. Son intensité est réglée par le paramètre $r \ge 0$
+(\texttt{--raffinement}, $1$ par défaut) : les tailles visées sont divisées
+par $r$, et $r = 0$ redonne exactement le maillage de la
+section~\ref{sec:construction}.
+
+\paragraph{Échantillonnage de $\partial\beta$.} Chaque composante de
+$\beta$ est échantillonnée au pas $h_\beta / 10$, morceau par morceau entre
+ses \emph{points de cassure} : les sommets d'un polygone, les extrémités des
+courbes d'un fichier CAO, et le seul point $t = 0$ pour un obstacle décrit
+en polaire. On note $p_i$ les échantillons, $s_i$ leur abscisse curviligne
+et $L_c$ la longueur de la composante $c$.
+
+\paragraph{Interstices.} Deux échantillons $p$ et $q$ se \emph{font face à
+travers $D$} si :
+\begin{enumerate}
+  \item ils appartiennent à deux composantes différentes, ou à la même
+        composante avec une distance le long de $\partial\beta$
+        \[
+        \sigma(p, q) = \min\big(|s_p - s_q|,\ L_c - |s_p - s_q|\big) > 2\,|p - q| ;
+        \]
+  \item le milieu $(p + q)/2$ est dans $D$.
+\end{enumerate}
+La condition 1 écarte les voisins le long d'une même courbe : sur un cercle,
+$\sigma(p, q) \le \frac{\pi}{2}\,|p - q|$, donc deux points ne se font
+jamais face. Elle retient en revanche les deux bords d'une encoche étroite.
+La condition 2 écarte une plaque mince, dont les deux faces sont proches à
+travers $\beta$ et non à travers $D$. Si $d(p)$ est la distance de $p$ au
+plus proche point qui lui fait face, la taille visée en $p$ est
+\[
+s(p) = \frac{d(p)}{3 r},
+\]
+soit au moins trois éléments dans la largeur de l'interstice. Seules les
+paires à distance inférieure à $3 r h_\beta$ peuvent donner $s < h_\beta$ :
+ce sont les seules cherchées (arbre \texttt{scipy.spatial.cKDTree}).
+
+\paragraph{Coins singuliers.} En chaque point de cassure $P$, on calcule
+l'angle signé $\varphi$ dont tourne la tangente, compté positivement vers la
+gauche quand $\partial\beta$ est parcouru dans le sens trigonométrique (le
+sens de parcours est donné par le signe de l'aire du polygone des
+échantillons). Si $\varphi > 15^\circ$, $P$ est un coin saillant de $\beta$
+et l'angle de $D$ en $P$ vaut $\omega = \pi + \varphi > \pi$ : $u$ y est
+singulière, et la taille visée est
+\[
+s(P) = \frac{h_\beta}{4 r}.
+\]
+Les coins rentrants de $\beta$ ($\varphi < 0$, angle de $D$ inférieur à
+$\pi$, $u$ régulière) et les raccords tangents entre deux courbes CAO ne sont
+pas raffinés.
+
+\paragraph{Courbure.} Un troisième critère, $s(p) = 0.3 / (r\, |\kappa(p)|)$,
+limite l'angle sous-tendu par un élément de $\partial\beta$ à $0.3 / r$ radian,
+la courbure $\kappa$ étant estimée par l'angle entre deux cordes. Il est
+désactivé par défaut (constante \texttt{CURVATURE} de \texttt{sizing.py}) :
+les arêtes courbes isoparamétriques suivent déjà bien un bord régulier, et le
+bilan ci-dessous montre qu'il coûte plus de nœuds qu'il ne rapporte.
+
+\paragraph{Gradation.} Les échantillons où $s_j < h_\beta$ deviennent des
+\emph{sources} $(p_j, s_j)$. On les gradue d'abord entre elles,
+$s_j \leftarrow \min_i \big(s_i + G\,|p_i - p_j|\big)$ avec $G = 0.25$, puis
+on définit en tout point $x$
+\[
+h_r(x) = \min_j \big( s_j + G\,|x - p_j| \big),
+\]
+qui croît d'au plus $G$ par unité de longueur en s'éloignant des sources. En
+pratique, le minimum est pris sur les $8$ sources les plus proches de $x$ ;
+grâce à la gradation préalable des $s_j$, cela surestime $h_r(x)$ d'au plus
+$2G$ fois la distance de $x$ à la source la plus proche.
+
+\paragraph{Utilisation.}
+\begin{itemize}
+  \item \textbf{Bord de $\beta$.} Le pas local sur $\partial\beta$ devient
+        $\min(h_\beta, h_r)$. Sur chaque morceau $[t_a, t_b]$ entre deux points
+        de cassure, on pose
+        \[
+        N(t) = \int_{t_a}^{t} \frac{\mathrm{d}s}{\min\big(h_\beta, h_r(\gamma(\tau))\big)},
+        \qquad n = \big\lceil N(t_b) \big\rceil,
+        \]
+        et on place les nœuds aux paramètres $t_i$ tels que
+        $N(t_i) = i\, N(t_b) / n$, $0 \le i < n$ (intégrale et inversion sur
+        un échantillonnage fin). Sans source, $N(t_b) = \ell / h_\beta$ et on
+        retrouve le découpage uniforme des sections~\ref{sec:polygone}
+        et~\ref{sec:step}. Les points de cassure restent des nœuds.
+  \item \textbf{Zone $\mathcal{T}$.} \texttt{gmsh} reçoit la taille
+        $\min\big(h_{\mathrm{loc}}(x), h_r(x)\big)$ : $h_r$ lui est transmise
+        par une fonction Python (\texttt{gmsh.model.mesh.setSizeCallback}),
+        qui reçoit en argument la taille $h_{\mathrm{loc}}$ du champ habituel.
+\end{itemize}
+
+\paragraph{Exemples.} Avec les paramètres par défaut ($r = 1$) :
+\begin{itemize}
+  \item \textbf{polygone en L} : les cinq coins saillants sont raffinés, pas
+        le coin rentrant ; 1279 triangles au lieu de 433 (figure de la
+        section~\ref{sec:polygone}) ;
+  \item \textbf{pièce de puzzle} : ses huit coins saillants sont raffinés ;
+        ses encoches, plus larges que $3 h_\beta$, ne comptent pas comme des
+        interstices ; 1552 triangles au lieu de 518 (figure de la
+        section~\ref{sec:step}) ;
+  \item \textbf{deux disques presque tangents} (\texttt{cao/disques\_tangents.step},
+        cas \texttt{tangents}) : deux disques de rayon $1$ séparés de
+        $\varepsilon = 0.05 < h_\beta$. Sans raffinement, un seul triangle
+        occupe la largeur de l'interstice ; avec, il y en a au moins trois
+        (742 triangles au lieu de 516). Pour un écart de $0.005$, le maillage
+        sans raffinement est refusé (éléments retournés,
+        section~\ref{sec:step}) ; avec, il est accepté sans changer
+        $h_\beta$ ;
+  \item \textbf{disque, cacahuète, \texttt{obstacle.step}, obstacle non
+        connexe} : ni coin singulier ni interstice, maillage inchangé.
+\end{itemize}
+
+\begin{center}
+\includegraphics[width=0.7\textwidth]{code/resultats/tangents/maillage.png}
+\end{center}
+
+\paragraph{Bilan coût / précision.} Pour savoir si les nœuds ajoutés sont
+utiles, on compare l'erreur en norme d'énergie
+$\|v\|_a^2 = |v|_{H^1}^2 + k\,\|v\|_{L^2}^2$ obtenue par le raffinement et
+par une réduction uniforme de $h_\beta$ ou de $h$. On prend $f = 1$,
+$u = 0$ sur $\partial D$, $k = 1$, et le même $\Omega$ pour tous les maillages
+(construit avec $h = 0.5$, section~\ref{sec:omega}). Si
+$V_h \subset H^1_0(D)$, l'orthogonalité de Galerkin
+$a(u - u_h, u_h) = 0$ donne
+\[
+\|u - u_h\|_a^2 = a(u, u) - a(u_h, u_h) = (f, u) - (f, u_h),
+\]
+avec $(f, u_h) = F \cdot U$ : l'erreur se calcule sans interpoler d'un
+maillage à l'autre. $(f, u)$ est pris sur un maillage de référence
+($h = 0.0625$, $h_\beta = 0.01$, $r = 3$). Cette identité est exacte pour le
+polygone ; pour un bord courbe, $D_h \neq D$ et elle n'est qu'approchée.
+L'écart entre deux maillages de référence successifs est inférieur à
+$10^{-2}$.
+\begin{center}
+\begin{tabular}{lrrrrrr}
+\hline
+& \multicolumn{2}{c}{polygone} & \multicolumn{2}{c}{puzzle} & \multicolumn{2}{c}{tangents} \\
+Maillage & nœuds & $\|e\|_a$ & nœuds & $\|e\|_a$ & nœuds & $\|e\|_a$ \\
+\hline
+$h = 0.5$, $h_\beta = 0.15$             & 1867  & $1.36 \cdot 10^{-1}$ & 2072  & $1.43 \cdot 10^{-1}$ & 2133  & $4.75 \cdot 10^{-2}$ \\
+$h = 0.5$, $h_\beta = 0.15$, $r = 1$    & 3585  & $6.45 \cdot 10^{-2}$ & 4176  & $7.25 \cdot 10^{-2}$ & 2635  & $4.67 \cdot 10^{-2}$ \\
+$h = 0.5$, $h_\beta = 0.05$             & 3524  & $8.24 \cdot 10^{-2}$ & 3958  & $8.43 \cdot 10^{-2}$ & 4145  & $4.53 \cdot 10^{-2}$ \\
+$h = 0.25$, $h_\beta = 0.075$           & 6736  & $7.56 \cdot 10^{-2}$ & 7360  & $8.45 \cdot 10^{-2}$ & 7675  & $1.27 \cdot 10^{-2}$ \\
+$h = 0.25$, $h_\beta = 0.075$, $r = 1$  & 8170  & $3.43 \cdot 10^{-2}$ & 9586  & $3.86 \cdot 10^{-2}$ & 8039  & $1.27 \cdot 10^{-2}$ \\
+$h = 0.125$, $h_\beta = 0.0375$         & 25559 & $4.74 \cdot 10^{-2}$ & 27477 & $5.22 \cdot 10^{-2}$ & 29039 & $3.21 \cdot 10^{-3}$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tikzpicture}
+\begin{loglogaxis}[width=0.75\textwidth, height=0.5\textwidth,
+    xlabel={nombre de nœuds}, ylabel={$\|u - u_h\|_a$},
+    legend pos=outer north east, legend cell align=left, grid=both,
+    grid style={gray!20}, log ticks with fixed point,
+    xtick={2000,4000,8000,16000,32000}, xticklabel style={/pgf/number format/1000 sep={\,}}]
+  \addplot[mark=o, blue] coordinates {(1867,0.1359) (6736,0.07559) (25559,0.04741)};
+  \addlegendentry{polygone, $h$ réduit}
+  \addplot[mark=*, blue, dashed] coordinates {(3585,0.06450) (8170,0.03426)};
+  \addlegendentry{polygone, $r = 1$}
+  \addplot[mark=square, red] coordinates {(2133,0.04746) (7675,0.01266) (29039,0.003207)};
+  \addlegendentry{tangents, $h$ réduit}
+  \addplot[mark=square*, red, dashed] coordinates {(2635,0.04667) (8039,0.01267)};
+  \addlegendentry{tangents, $r = 1$}
+  \addplot[black, dotted, domain=2000:30000] {0.04746*2133/x};
+  \addlegendentry{pente $-1$}
+\end{loglogaxis}
+\end{tikzpicture}
+\end{center}
+
+Sur un domaine régulier, réduire $h$ (avec $h_\beta / h$ fixé) fait décroître
+l'erreur comme $h^2 \propto N^{-1}$, où $N$ est le nombre de nœuds : c'est le
+cas de \texttt{tangents} (pente $-1$ ci-dessus). Un raffinement vaut le coup
+s'il fait mieux à nombre de nœuds égal.
+\begin{itemize}
+  \item \textbf{Coins singuliers : rentable.} Pour le polygone et la pièce de
+        puzzle, $r = 1$ divise l'erreur par $2$ pour $1.9$ à $2$ fois plus de
+        nœuds ; à nombre de nœuds comparable, réduire $h_\beta$ partout
+        ($h_\beta = 0.05$) fait nettement moins bien. Réduire $h$ est très
+        inefficace : avec $13.7$ fois plus de nœuds ($h = 0.125$), l'erreur du
+        polygone n'est divisée que par $2.9$. C'est la singularité qui limite
+        la convergence : pour $\omega = 3\pi/2$, l'erreur décroît comme
+        $h^{2/3} \propto N^{-1/3}$, soit un facteur $13.7^{-1/3} \approx 0.42$,
+        proche du $0.35$ observé. La meilleure combinaison est $h = 0.25$ avec
+        $r = 1$ : un quart de l'erreur initiale avec $8170$ nœuds.
+  \item \textbf{Interstice : pas rentable en norme d'énergie.} Pour
+        \texttt{tangents}, l'erreur ne baisse que de $2\,\%$ ; elle vient
+        surtout de la grille $\mathcal{Q}$ de pas $h = 0.5$, loin de $\beta$.
+        Localement, en revanche, la valeur de $u_h$ au milieu de l'interstice
+        passe d'une erreur de $0.4$ à $0.7\,\%$ à moins de $0.1\,\%$ (référence :
+        $h_\beta = 0.005$, $31\,871$ nœuds), pour $24\,\%$ de nœuds en plus.
+        Le critère est surtout utile pour la robustesse (éléments retournés)
+        et si l'on s'intéresse à la solution dans l'interstice.
+  \item \textbf{Courbure : pas rentable.} Activé, le critère de courbure
+        raffine les coins arrondis (rayon $0.2$) de \texttt{obstacle.step}
+        et de \texttt{deux\_obstacles.step} : l'erreur est multipliée par
+        $0.88$ et $0.79$ pour $1.28$ et $1.56$ fois plus de nœuds, moins bien
+        que $N^{-1}$ ($0.78$ et $0.64$). D'où sa désactivation par défaut.
+\end{itemize}
+
+\paragraph{Remarque.} La taille au coin, $h_\beta / (4r)$, est
+proportionnelle à $h_\beta$, donc à $h$ quand $h_\beta / h$ est fixé : quand
+$h \to 0$, le maillage reste quasi uniforme à l'échelle du coin, et l'ordre
+de convergence reste $\lambda$ ; seule la constante est réduite. Retrouver
+l'ordre optimal demanderait la gradation en $r^{1-\mu}$ décrite à la
+section~\ref{sec:polygone}, avec une taille minimale qui décroît plus vite que
+$h$.
 
 \section{Discrétisation}
 
@@ -1289,7 +1524,8 @@ avec $f = 1$. Il n'y a pas de solution exacte : on vérifie seulement que
 $u_h$ est positive, nulle sur $\partial D$ et régulière. On fait de même pour
 le disque, l'obstacle polygonal (section~\ref{sec:polygone}), les obstacles
 lus dans les fichiers STEP de \texttt{code/cao/} (section~\ref{sec:step}), y
-compris l'obstacle non connexe, et les trois obstacles éloignés de la
+compris l'obstacle non connexe et les deux disques presque tangents
+(section~\ref{sec:raffinement}), et les trois obstacles éloignés de la
 section~\ref{sec:step} (avec $g_\beta = 1 + x / L_x$ sur $\partial\beta$).
 
 Pour illustrer la condition non homogène, on reprend la cacahuète avec
@@ -1329,6 +1565,7 @@ $h$              & $0.5$        & pas de la grille \\
 $h_\beta$        & $0.15$       & pas sur $\partial\beta$ \\
 $\delta$         & $0.8$        & largeur de la zone de transition \\
 $m_\beta$        & $1$         & distance minimale entre $\mathcal{Q}$ et $\beta$ ($m_\beta > h/2$) \\
+$r$              & $1$         & intensité du raffinement a priori ($0$ : aucun) \\
 disque           & $c = (3.5, 2.5)$, $R = 1$ & obstacle de validation \\
 cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
                  & $\varepsilon = 0.35$ & (puis translatée avec $\Omega$) \\
@@ -1346,6 +1583,7 @@ Module & Contenu \\
 \texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, $\phi_\beta$, \\
                       & polygone, lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
 \texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
+\texttt{sizing.py}    & raffinement a priori : sources aux coins et interstices, taille $h_r$ \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
 \texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$ (signe de $\det D\Phi_K$ vérifié), $R^K$, $M^K$, $F^K$, \\
                       & assemblage creux, erreurs par élément \\
@@ -1357,7 +1595,8 @@ Module & Contenu \\
 \texttt{ui.py}        & menu, questions au terminal, fenêtre de validation du maillage \\
 \texttt{main.py}      & point d'entrée : ligne de commande (section~\ref{sec:usage}) \\
 \texttt{tests/}       & tests automatiques (section~\ref{sec:tests}) \\
-\texttt{cao/}         & fichiers STEP d'exemple et script \texttt{make\_obstacle.py} \\
+\texttt{cao/}         & fichiers STEP d'exemple (dont \texttt{disques\_tangents.step}) \\
+                      & et script \texttt{make\_obstacle.py} qui les génère \\
 \hline
 \end{tabular}
 \end{center}
@@ -1385,8 +1624,14 @@ exécute en quelques secondes :
         éléments droits ($k = 0$ et $k = 1$) ;
   \item \textbf{convergence} : ordres supérieurs à $2.7$ en $L^2$ et à $1.8$
         en $H^1$ sur $h = 0.5$, $0.25$, $0.125$ ;
-  \item \textbf{garde-fous} : $m_\beta \le h/2$, $r \le 0$, composantes
-        imbriquées ou qui se chevauchent, éléments retournés.
+  \item \textbf{garde-fous} : $m_\beta \le h/2$, $r(\theta) \le 0$, composantes
+        imbriquées ou qui se chevauchent, éléments retournés ;
+  \item \textbf{raffinement} : sans source, nœuds de $\partial\beta$
+        identiques au découpage uniforme et disque inchangé ; seuls les cinq
+        coins saillants du L sont raffinés ; au moins trois éléments dans
+        l'interstice des disques tangents ; deux disques à $0.005$ maillés
+        avec raffinement ; plaque mince non prise pour un interstice ; critère
+        de courbure désactivé par défaut et effectif une fois activé.
 \end{itemize}
 
 \subsection{Utilisation de \texttt{main.py}}
@@ -1399,7 +1644,7 @@ de triangles et de quadrilatères, et montre le maillage dans une fenêtre
 avec deux boutons \og Valider \fg{} et \og Refuser \fg{}. L'assemblage et la
 résolution ne sont lancés qu'après validation. En cas de
 refus ou d'échec du maillage, on peut modifier les paramètres $h$,
-$h_\beta$, $\delta$, $m_\beta$ (Entrée conserve la valeur courante), changer
+$h_\beta$, $\delta$, $m_\beta$, $r$ (Entrée conserve la valeur courante), changer
 d'obstacle ou quitter. Sans affichage disponible (\emph{backend}
 \texttt{matplotlib} non interactif), le maillage est écrit dans
 \texttt{resultats/} et la validation se fait au clavier.
@@ -1430,7 +1675,7 @@ Commande & Effet \\
                                         \texttt{cacahuete\_dirichlet}, \\
                                       & \texttt{polygone}, \texttt{step}, \texttt{puzzle},
                                         \texttt{puzzle\_gauss}, \\
-                                      & \texttt{non\_connexe}, \texttt{eloignes} \\
+                                      & \texttt{non\_connexe}, \texttt{tangents}, \texttt{eloignes} \\
 \texttt{python3 main.py --step f.step} & obstacle lu dans un fichier STEP / IGES / BREP
                                          (\texttt{--echelle}) \\
 \texttt{python3 main.py --obstacle \dots} & $\beta$ composé, option à répéter
@@ -1447,7 +1692,8 @@ Commande & Effet \\
 \end{center}
 Les options \texttt{--h}, \texttt{--h-beta}, \texttt{--delta} et
 \texttt{--m-beta} changent les paramètres de maillage (strictement positifs,
-avec $m_\beta > h/2$), \texttt{--k} le
+avec $m_\beta > h/2$), \texttt{--raffinement} l'intensité $r \ge 0$ du
+raffinement a priori (1 par défaut, 0 pour le désactiver), \texttt{--k} le
 coefficient $k \ge 0$ de l'équation (1 par défaut ; pour une autre valeur,
 les figures de solution et de validation prennent le suffixe
 \texttt{\_k<valeur>}), \texttt{--gauss} $x_0$ $y_0$ et \texttt{--sigma}
@@ -1501,7 +1747,8 @@ ci-dessus.
   \item Les figures sont rangées dans \texttt{resultats/}, un sous-dossier
         par obstacle : \texttt{disque}, \texttt{cacahuete}, \texttt{polygone},
         \texttt{step}, \texttt{puzzle}, \texttt{non\_connexe},
-        \texttt{eloignes}, \texttt{compose/<types>\_<empreinte>} (obstacle
+        \texttt{tangents}, \texttt{eloignes},
+        \texttt{compose/<types>\_<empreinte>} (obstacle
         composé, l'empreinte distinguant deux jeux de paramètres) et le nom
         du fichier en minuscules pour \texttt{--step} (suivi de
         \texttt{\_x<échelle>} si l'échelle n'est pas 1). Les figures du cas de
