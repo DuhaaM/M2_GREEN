@@ -941,6 +941,11 @@ def parse_args():
         parser.error("--k : k doit être positif ou nul (sinon a n'est plus coercive)")
     if args.sigma <= 0:
         parser.error("--sigma : sigma doit être strictement positif")
+    if min(args.h, args.h_beta, args.delta) <= 0:
+        parser.error("--h, --h-beta, --delta : valeurs strictement positives attendues")
+    if args.m_beta <= args.h / 2:
+        parser.error(f"--m-beta : il faut m_beta > h/2 = {args.h / 2:g} "
+                     "(sinon des cellules de la grille peuvent toucher beta)")
     for spec in args.components or []:
         try:
             check_spec(spec)

@@ -185,6 +185,10 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     nx, ny = int(round(Lx / h)), int(round(Ly / h))
     if abs(nx * h - Lx) > 1e-9 or abs(ny * h - Ly) > 1e-9:
         raise ValueError("Lx / h et Ly / h doivent être entiers.")
+    # Tout point d'une cellule est à moins de h/2 de l'un des 5 points testés par select_cells
+    # (sommets et centre) : m_beta > h/2 garantit que les cellules gardées ne touchent pas beta
+    if m_beta <= h / 2:
+        raise ValueError(f"m_beta = {m_beta:g} trop petit : il faut m_beta > h/2 = {h / 2:g}.")
 
     keep = select_cells(obstacle, nx, ny, h, m_beta)
     loops, holes = inner_contours(keep)
@@ -195,8 +199,13 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     # Trou de Q contenant chaque composante (repéré par la cellule d'un point de son bord)
     members = [[] for _ in loops]
     for c, xy in enumerate(beta_xy):
-        i, j = np.clip((xy[0] // h).astype(int), 0, [nx - 1, ny - 1])
-        members[holes[i, j] - 1].append(c)
+        i, j = np.clip((xy // h).astype(int), 0, [nx - 1, ny - 1]).T
+        hole = np.unique(holes[i, j])
+        if hole[0] == 0:
+            raise ValueError(f"La composante {c + 1} de beta traverse une cellule de Q.")
+        if len(hole) > 1:
+            raise ValueError(f"La composante {c + 1} de beta est à cheval sur plusieurs trous de Q.")
+        members[hole[0] - 1].append(c)
 
     coords = []            # coordonnées de tous les nœuds
     on_beta = []           # nœud situé sur dbeta

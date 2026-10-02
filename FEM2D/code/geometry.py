@@ -16,6 +16,9 @@ class Obstacle:
         self.radius = radius  # fonction theta -> r(theta), 2pi-périodique
         # Échantillonnage fin de gamma, utilisé pour la distance et l'abscisse curviligne
         self.t_fine = np.linspace(0.0, 2 * np.pi, n_samples, endpoint=False)
+        # r > 0 : beta est étoilé par rapport à c et gamma est une courbe simple
+        if np.any(radius(self.t_fine) <= 0):
+            raise ValueError("Obstacle polaire : r(theta) doit être strictement positif.")
         self.pts_fine = self.gamma(self.t_fine)
         self.vertices = self.pts_fine  # échantillons de gamma (boîte englobante de beta)
         self.tree = cKDTree(self.pts_fine)
@@ -171,16 +174,19 @@ class MultiObstacle:
 
     def __init__(self, components):
         self.components = list(components)
-        # Échantillons de chaque bord : boîte englobante et test d'imbrication
-        samples = [c.gamma(np.linspace(0.0, 2 * np.pi, 400, endpoint=False))
-                   for c in self.components]
-        for i, a in enumerate(self.components):
-            for j, pts in enumerate(samples):
-                if i != j and a.inside(pts).any():
-                    raise ValueError("Deux composantes de beta sont imbriquées ou se chevauchent "
-                                     "(beta troué ?).")
-        self.vertices = np.vstack([getattr(c, "vertices", s)
-                                   for c, s in zip(self.components, samples)])
+        # Bords polygonaux (sommets ou échantillons de gamma) : test exact de croisement des
+        # bords ou d'imbrication, seulement si les boîtes englobantes se rencontrent
+        verts = [c.vertices for c in self.components]
+        boxes = [(v.min(axis=0), v.max(axis=0)) for v in verts]
+        paths = [Path(np.vstack((v, v[:1])), closed=True) for v in verts]
+        for i in range(len(paths)):
+            for j in range(i + 1, len(paths)):
+                (lo_i, hi_i), (lo_j, hi_j) = boxes[i], boxes[j]
+                if np.all(lo_i <= hi_j) and np.all(lo_j <= hi_i) \
+                        and paths[i].intersects_path(paths[j], filled=True):
+                    raise ValueError(f"Les composantes {i + 1} et {j + 1} de beta sont imbriquées "
+                                     "ou se chevauchent (beta troué ?).")
+        self.vertices = np.vstack(verts)
 
     def inside(self, pts):
         return np.any([c.inside(pts) for c in self.components], axis=0)
