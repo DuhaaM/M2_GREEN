@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # LaTeX (fichiers auxiliaires de compilation)
 *.aux
@@ -18,3 +19,7 @@ __pycache__/
 
 # Dossier annexe (applications hors du code principal)
 FEM2D/annexes/
+
+# Figures produites par FEM2D/code/main.py : seules celles citées dans Mesh2D.tex sont suivies
+# (déjà suivies, elles le restent ; pour en ajouter une nouvelle : git add -f <figure>)
+FEM2D/code/resultats/

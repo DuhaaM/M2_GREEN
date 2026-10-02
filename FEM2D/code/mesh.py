@@ -10,6 +10,8 @@ import gmsh
 import numpy as np
 from scipy import ndimage
 
+from assembly import check_jacobians
+
 
 @dataclass
 class Mesh:
@@ -296,4 +298,6 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     bnd = np.nonzero(on_omega | on_beta)[0]
     bnd_beta = np.nonzero(on_beta)[0]
 
-    return Mesh(coords=coords, tri=tri, quad=quad, bnd=bnd, bnd_beta=bnd_beta, beta_points=beta_xy)
+    mesh = Mesh(coords=coords, tri=tri, quad=quad, bnd=bnd, bnd_beta=bnd_beta, beta_points=beta_xy)
+    check_jacobians(mesh)  # éléments courbes retournés : refusés dès le maillage
+    return mesh

@@ -290,6 +290,4 @@ def domain_from_obstacle(obstacle, h, d_min, m_beta=None):
     n = np.ceil((hi - lo + 2 * d_min) / h - 1e-9).astype(int)
     origin = 0.5 * (lo + hi) - 0.5 * n * h
     Lx, Ly = n * h
-    if isinstance(obstacle, Polygon):
-        return Polygon(obstacle.vertices - origin), Lx, Ly, -origin
     return obstacle.translated(-origin), Lx, Ly, -origin

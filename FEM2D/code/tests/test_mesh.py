@@ -2,10 +2,10 @@
 import numpy as np
 import pytest
 
-from assembly import element_errors
+from assembly import check_jacobians, element_errors
 from cases import CASES, DISK, POLYGON, prepare
 from config import LX, LY, MeshParams
-from geometry import MultiObstacle, Obstacle, Polygon, disk, peanut
+from geometry import MultiObstacle, Obstacle, Polygon, disk, domain_from_obstacle, peanut
 from mesh import build_mesh
 
 # Arêtes locales (sommet, sommet, milieu)
@@ -92,3 +92,24 @@ def test_overlapping_components(components):
 def test_disjoint_components():
     multi = MultiObstacle([disk((0, 0), 1), disk((2.5, 0), 1), Polygon([(5, 0), (6, 0), (6, 1)])])
     assert len(multi.components) == 3
+
+
+def close_disks_mesh(gap, h_beta):
+    multi = MultiObstacle([disk((0, 0), 1), disk((2 + gap, 0), 1)])
+    obstacle, Lx, Ly, _ = domain_from_obstacle(multi, 0.5, 3.0, 1.0)
+    return build_mesh(obstacle, Lx, Ly, 0.5, h_beta, 0.8, 1.0)
+
+
+def test_close_components_inverted_elements():
+    """Deux disques à 0.005 l'un de l'autre : triangles courbes retournés, refusés au maillage ;
+    un h_beta plus petit règle le problème, comme l'indique le message."""
+    with pytest.raises(ValueError, match="Jacobien négatif.*réduire h_beta"):
+        close_disks_mesh(0.005, 0.15)
+    close_disks_mesh(0.005, 0.075)
+
+
+def test_check_jacobians_flipped_element():
+    mesh, _, _ = prepare(CASES["disque"], MeshParams())
+    mesh.quad[7] = mesh.quad[7][[1, 0, 3, 2, 4, 7, 6, 5, 8]]  # carré retourné (symétrie x)
+    with pytest.raises(ValueError, match="quadrilatère n° 7"):
+        check_jacobians(mesh)
