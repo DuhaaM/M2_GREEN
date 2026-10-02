@@ -3,9 +3,11 @@ import numpy as np
 import pytest
 
 from assembly import assemble, total_errors
+from cases import DISK
+from config import LX, LY
 from geometry import disk
-from main import DISK, LX, LY, validation_problem
 from mesh import build_mesh
+from validation import validation_problem
 
 
 @pytest.mark.parametrize("k", [0.0, 1.0])

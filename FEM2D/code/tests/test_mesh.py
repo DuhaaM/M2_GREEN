@@ -3,8 +3,9 @@ import numpy as np
 import pytest
 
 from assembly import element_errors
+from cases import CASES, DISK, POLYGON, prepare
+from config import LX, LY, MeshParams
 from geometry import MultiObstacle, Obstacle, Polygon, disk, peanut
-from main import CASES, DISK, LX, LY, POLYGON, MeshParams, prepare
 from mesh import build_mesh
 
 # Arêtes locales (sommet, sommet, milieu)
