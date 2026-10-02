@@ -15,3 +15,6 @@ __pycache__/
 \#*#
 .#*
 *~
+
+# Dossier annexe (applications hors du code principal)
+FEM2D/annexes/
