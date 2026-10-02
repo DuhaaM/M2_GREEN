@@ -211,6 +211,9 @@ Deux formes sont utilisées :
         $0 \le \varepsilon < 1$ pour que $r > 0$. Le bord est concave en
         $\theta = \pm\pi/2$ dès que $\varepsilon > 1/5$.
 \end{itemize}
+La condition $r > 0$ est vérifiée sur l'échantillonnage de $\gamma$ : elle
+garantit que $\beta$ est étoilé par rapport à $c$ et que $\gamma$ est une
+courbe simple.
 Les opérations géométriques dont le code a besoin sont alors :
 \begin{itemize}
   \item \textbf{test d'appartenance} : $x \in \beta \iff \rho(x) \le r(\theta(x))$ ;
@@ -235,8 +238,13 @@ Le maillage se construit ainsi :
 \begin{enumerate}
   \item \textbf{Sélection des cellules.} On garde les cellules de la grille
         dont les quatre sommets et le centre sont hors de $\beta$ et à
-        distance au moins $m_\beta$ de $\beta$. On retire ensuite, jusqu'à
-        stabilisation :
+        distance au moins $m_\beta$ de $\beta$. Tout point d'une cellule est
+        à distance au plus $h/2$ de l'un de ces cinq points (le maximum est
+        atteint aux milieux des côtés) ; on impose donc $m_\beta > h/2$, ce
+        qui garantit qu'une cellule gardée ne rencontre pas $\beta$ et que
+        les contours de l'étape 2 restent à distance au moins
+        $m_\beta - h/2 > 0$ de $\beta$. Le maillage est refusé sinon. On
+        retire ensuite, jusqu'à stabilisation :
         \begin{itemize}
           \item les îlots de cellules qui ne sont pas reliés (par des arêtes)
                 à la rangée de cellules le long de $\partial\Omega$, par
@@ -739,7 +747,17 @@ section~\ref{sec:construction}). Les deux situations peuvent coexister. Si
 des cellules de $\mathcal{Q}$ sont enfermées entre plusieurs composantes,
 sans lien avec le bord de $\Omega$, elles sont retirées (étape 1) et le trou
 englobe tout le groupe. Sont refusés un $\beta$ troué (une composante
-contient une autre) et deux faces qui se chevauchent.
+contient une autre) et deux faces qui se chevauchent ; le test porte sur les
+contours (croisement de deux contours ou contour contenu dans un autre), et
+seulement pour les composantes dont les boîtes englobantes se rencontrent.
+
+Des composantes \emph{très} proches sont acceptées, mais les triangles du
+couloir qui les sépare sont alors très aplatis. Si l'un d'eux a une arête
+courbe, il peut se retourner : par exemple, pour deux disques de rayon $1$
+séparés de $0.005$, avec $h_\beta = 0.15$, deux triangles ont
+$\det D\Phi_T < 0$ en un point de quadrature. Le maillage est alors refusé avec
+la position des éléments fautifs ; diviser $h_\beta$ par deux (flèche
+$h_\beta^2 / 8R$ divisée par quatre) suffit dans cet exemple.
 
 \paragraph{Validation et exemple.} Pour deux disques
 $\beta_c = D(c_c, R_c)$, avec $c_1 = (2.5, 2.5)$, $R_1 = 0.7$,
@@ -923,7 +941,13 @@ avec les fonctions de référence.
         \]
   \item \textbf{Triangle courbe} (une arête sur $\partial\beta$, milieu placé
         sur la courbe) : $\Phi_T$ est quadratique et $D\Phi_T$ dépend du point.
-        C'est ce qui permet à l'élément de suivre le bord de $\beta$.
+        C'est ce qui permet à l'élément de suivre le bord de $\beta$. Il faut
+        alors $\det D\Phi_T > 0$ en tout point, ce qui n'est plus automatique :
+        si l'écart entre le milieu placé sur la courbe et le milieu de la
+        corde est grand devant la hauteur du triangle, l'élément se
+        retourne. Le signe de $\det D\Phi_K$ est donc vérifié à la fin de la
+        construction du maillage, en chaque point de quadrature de chaque
+        élément (section~\ref{sec:step}, composantes très proches).
 \end{itemize}
 
 \section{Système linéaire et structure des matrices}
@@ -1304,7 +1328,7 @@ $d_{\min}$       & $m_\beta + 4h = 3$ & marge entre $\beta$ et $\partial\Omega$ 
 $h$              & $0.5$        & pas de la grille \\
 $h_\beta$        & $0.15$       & pas sur $\partial\beta$ \\
 $\delta$         & $0.8$        & largeur de la zone de transition \\
-$m_\beta$        & $1$         & distance minimale entre $\mathcal{Q}$ et $\beta$ \\
+$m_\beta$        & $1$         & distance minimale entre $\mathcal{Q}$ et $\beta$ ($m_\beta > h/2$) \\
 disque           & $c = (3.5, 2.5)$, $R = 1$ & obstacle de validation \\
 cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
                  & $\varepsilon = 0.35$ & (puis translatée avec $\Omega$) \\
@@ -1323,16 +1347,47 @@ Module & Contenu \\
                       & polygone, lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
 \texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
-\texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$, $R^K$, $M^K$, $F^K$, assemblage creux \\
+\texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$ (signe de $\det D\Phi_K$ vérifié), $R^K$, $M^K$, $F^K$, \\
+                      & assemblage creux, erreurs par élément \\
 \texttt{solver.py}    & élimination des nœuds de $\mathcal{B}$ ($U_\mathcal{B} = G_\mathcal{B}$), résolution \\
-\texttt{main.py}      & cas de validation, étude de convergence, cas d'application, \\
-                      & ligne de commande, menu, validation du maillage, figures \\
+\texttt{config.py}    & paramètres par défaut, dossier \texttt{resultats/} \\
+\texttt{cases.py}     & cas prédéfinis, obstacles composés, maillage et résolution d'un cas \\
+\texttt{validation.py} & solution manufacturée, étude de convergence, erreur par élément \\
+\texttt{plots.py}     & figures du maillage, de la solution et de la convergence \\
+\texttt{ui.py}        & menu, questions au terminal, fenêtre de validation du maillage \\
+\texttt{main.py}      & point d'entrée : ligne de commande (section~\ref{sec:usage}) \\
+\texttt{tests/}       & tests automatiques (section~\ref{sec:tests}) \\
 \texttt{cao/}         & fichiers STEP d'exemple et script \texttt{make\_obstacle.py} \\
 \hline
 \end{tabular}
 \end{center}
 
-Dépendances : \texttt{numpy}, \texttt{scipy}, \texttt{gmsh}, \texttt{matplotlib}.
+Dépendances : \texttt{numpy}, \texttt{scipy}, \texttt{gmsh}, \texttt{matplotlib}
+et, pour les tests, \texttt{pytest} ; les versions minimales testées sont
+dans \texttt{requirements.txt} (\texttt{pip install -r requirements.txt}).
+
+\subsection{Tests}
+\label{sec:tests}
+
+La commande \texttt{python3 -m pytest tests}, lancée dans \texttt{code/},
+exécute en quelques secondes :
+\begin{itemize}
+  \item \textbf{éléments de référence} : $\widehat{\psi}_i(\hat{x}_j) = \delta_{ij}$,
+        $\sum_i \widehat{\psi}_i = 1$, gradients comparés à des différences
+        finies, exactitude des quadratures (degré 4 sur le triangle, 5 par
+        direction sur le carré) ;
+  \item \textbf{maillage} : conformité (chaque arête appartient à au plus
+        deux éléments, qui partagent son nœud milieu ; une arête d'un seul
+        élément est sur $\partial D$), absence de nœud isolé, aire de $D$
+        (exacte pour le polygone, à $10^{-6}$ près pour le disque) ;
+  \item \textbf{patch test} : pour $u$ de degré 2, $A U = F$ à la précision
+        machine sur les lignes des nœuds dont le support ne contient que des
+        éléments droits ($k = 0$ et $k = 1$) ;
+  \item \textbf{convergence} : ordres supérieurs à $2.7$ en $L^2$ et à $1.8$
+        en $H^1$ sur $h = 0.5$, $0.25$, $0.125$ ;
+  \item \textbf{garde-fous} : $m_\beta \le h/2$, $r \le 0$, composantes
+        imbriquées ou qui se chevauchent, éléments retournés.
+\end{itemize}
 
 \subsection{Utilisation de \texttt{main.py}}
 \label{sec:usage}
@@ -1391,7 +1446,8 @@ Commande & Effet \\
 \end{tabular}
 \end{center}
 Les options \texttt{--h}, \texttt{--h-beta}, \texttt{--delta} et
-\texttt{--m-beta} changent les paramètres de maillage, \texttt{--k} le
+\texttt{--m-beta} changent les paramètres de maillage (strictement positifs,
+avec $m_\beta > h/2$), \texttt{--k} le
 coefficient $k \ge 0$ de l'équation (1 par défaut ; pour une autre valeur,
 les figures de solution et de validation prennent le suffixe
 \texttt{\_k<valeur>}), \texttt{--gauss} $x_0$ $y_0$ et \texttt{--sigma}
