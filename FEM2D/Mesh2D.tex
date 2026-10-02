@@ -1349,12 +1349,16 @@ d'obstacle ou quitter. Sans affichage disponible (\emph{backend}
 \texttt{matplotlib} non interactif), le maillage est écrit dans
 \texttt{resultats/} et la validation se fait au clavier.
 
-\paragraph{Choix de la source.} Dans la fenêtre du maillage, un clic gauche
-dans $D$ place le centre $(x_0, y_0)$ d'une source gaussienne
-$f(x_0, y_0) = 1$ (croix et cercle de rayon $\sigma$ tracés en rouge), un
-clic droit l'annule ; sans clic, la source du cas est conservée ($f = 1$,
-ou la gaussienne de \texttt{puzzle\_gauss}). Un clic hors de $\Omega$ ou
-dans $\beta$ est signalé en rouge dans le titre et ignoré. Sans affichage,
+\paragraph{Choix de la source.} Dans la fenêtre du maillage, le centre
+$(x_0, y_0)$ d'une source gaussienne $f(x_0, y_0) = 1$ se place d'un clic
+gauche dans $D$, ou, pour plus de précision, en saisissant $x_0$ et $y_0$
+dans les deux champs sous la figure (validés par Entrée). Un clic remplit
+ces champs, qu'on peut ensuite corriger. Le centre est marqué d'une croix et
+d'un cercle de rayon $\sigma$ en rouge ; un clic droit l'annule. Sans choix,
+la source du cas est conservée ($f = 1$, ou la gaussienne de
+\texttt{puzzle\_gauss}). Un point hors de $\Omega$ ou dans $\beta$, ou une
+saisie qui n'est pas un nombre, est signalé en rouge dans le titre et
+ignoré. Sans affichage,
 la question est posée au terminal après validation : Entrée garde la source
 du cas, \texttt{g} demande $x_0$, $y_0$ (redemandés tant que le point n'est
 pas dans $D$) et $\sigma$. Avec \texttt{--gauss} ou \texttt{-y}, rien n'est

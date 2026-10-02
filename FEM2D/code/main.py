@@ -13,8 +13,8 @@ Sections 6 et 7 de main.tex. Lancer :
     python3 main.py tous                  tous les cas en parallèle, sans validation du maillage
     python3 main.py erreurs --h 0.25      erreur de chaque élément (cas de validation), au clic
 Le maillage est affiché et doit être validé avant l'assemblage et la résolution ; la source f
-(celle du cas, ou une gaussienne f(x0, y0) = 1) se choisit en cliquant (x0, y0) sur le maillage,
-ou à défaut au terminal après validation.
+(celle du cas, ou une gaussienne f(x0, y0) = 1) se choisit en cliquant (x0, y0) sur le maillage
+ou en saisissant x0, y0 sous la figure, ou à défaut au terminal après validation.
 Les figures sont écrites dans le dossier resultats/ à côté de ce fichier, un sous-dossier par
 obstacle (maillage.png, solution*.png), plus resultats/validation/ ; suffixe _k<valeur> pour les
 solutions et la validation si k n'est pas 1.
@@ -34,7 +34,7 @@ from matplotlib.colors import LogNorm
 from matplotlib.patches import Circle as MplCircle, Polygon as MplPolygon
 from matplotlib.path import Path
 from matplotlib.tri import Triangulation
-from matplotlib.widgets import Button, RadioButtons
+from matplotlib.widgets import Button, RadioButtons, TextBox
 import numpy as np
 
 from assembly import element_errors, total_errors
@@ -749,8 +749,9 @@ def ask_params(params):
 
 
 def review_mesh(mesh, case, pick=False, sigma=SIGMA):
-    """Affiche le maillage et renvoie (validé, centre). Si pick, un clic gauche dans Omega choisit
-    le centre (x0, y0) de la source gaussienne (clic droit : annulé) ; centre = None sinon."""
+    """Affiche le maillage et renvoie (validé, centre). Si pick, le centre (x0, y0) de la source
+    gaussienne se choisit d'un clic gauche dans Omega ou en saisissant x0, y0 dans les champs sous
+    la figure (Entrée) ; clic droit : annulé. centre = None sinon."""
     path = out_path(case.folder, "maillage.png")
     fig = mesh_figure(mesh)
     fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -772,39 +773,75 @@ def review_mesh(mesh, case, pick=False, sigma=SIGMA):
     disc = MplCircle((0, 0), sigma, fill=False, ls="--", color="tab:red", visible=False, zorder=5)
     ax.add_patch(disc)
 
-    def on_click(event):
-        if event.inaxes is not ax or fig.canvas.toolbar is not None and fig.canvas.toolbar.mode:
-            return  # boutons, ou zoom / déplacement en cours
-        if event.button == 3:
-            decision.pop("center", None)
-            mark.set_data([], [])
-            disc.set_visible(False)
-            ax.set_title(title + "\nsource du cas (clic gauche : centre de la gaussienne)", color="black")
-        elif event.button == 1:
-            err = center_error(mesh, hi_x, hi_y, event.xdata, event.ydata)
-            if err:
-                print(f"Erreur : {err}, centre non retenu.")
-                ax.set_title(title + f"\nErreur : {err}", color="tab:red")
-                fig.canvas.draw_idle()
-                return
-            x0, y0 = decision["center"] = (event.xdata, event.ydata)
-            mark.set_data([x0], [y0])
-            disc.center = (x0, y0)
-            disc.set_visible(True)
-            ax.set_title(title + f"\nf gaussienne, f({x0:.3g}, {y0:.3g}) = 1, σ = {sigma:g} "
-                                 "(clic droit : annuler)", color="black")
+    def show_error(err):
+        print(f"Erreur : {err}, centre non retenu.")
+        ax.set_title(title + f"\nErreur : {err}", color="tab:red")
         fig.canvas.draw_idle()
 
-    fig.subplots_adjust(bottom=0.14)
+    def fill_boxes(text_x, text_y):
+        """Champs x0, y0 mis à jour sans déclencher leur validation."""
+        for box, text in ((box_x, text_x), (box_y, text_y)):
+            box.eventson = False
+            box.set_val(text)
+            box.eventson = True
+
+    def set_center(x0, y0):
+        err = center_error(mesh, hi_x, hi_y, x0, y0)
+        if err:
+            show_error(err)
+            return
+        decision["center"] = (x0, y0)
+        mark.set_data([x0], [y0])
+        disc.center = (x0, y0)
+        disc.set_visible(True)
+        ax.set_title(title + f"\nf gaussienne, f({x0:.6g}, {y0:.6g}) = 1, σ = {sigma:g} "
+                             "(clic droit : annuler)", color="black")
+        fig.canvas.draw_idle()
+
+    def clear_center():
+        decision.pop("center", None)
+        mark.set_data([], [])
+        disc.set_visible(False)
+        fill_boxes("", "")
+        ax.set_title(title + "\nsource du cas (clic gauche ou x0, y0 : centre de la gaussienne)",
+                     color="black")
+        fig.canvas.draw_idle()
+
+    def on_click(event):
+        if event.inaxes is not ax or fig.canvas.toolbar is not None and fig.canvas.toolbar.mode:
+            return  # boutons, champs, ou zoom / déplacement en cours
+        if event.button == 3:
+            clear_center()
+        elif event.button == 1:
+            fill_boxes(f"{event.xdata:.4f}", f"{event.ydata:.4f}")
+            set_center(event.xdata, event.ydata)
+
+    def on_submit(_):
+        """Centre saisi : appliqué dès que x0 et y0 sont tous deux remplis."""
+        if not (box_x.text.strip() and box_y.text.strip()):
+            return
+        try:
+            x0, y0 = float(box_x.text), float(box_y.text)
+        except ValueError:
+            show_error(f"« {box_x.text} », « {box_y.text} » : nombres attendus")
+            return
+        set_center(x0, y0)
+
+    fig.subplots_adjust(bottom=0.22 if pick else 0.14)
     b_ok = Button(fig.add_axes([0.25, 0.02, 0.2, 0.06]), "Valider", color="#b8e0b8", hovercolor="#8fd08f")
     b_no = Button(fig.add_axes([0.55, 0.02, 0.2, 0.06]), "Refuser", color="#f0b8b8", hovercolor="#e89090")
     b_ok.on_clicked(lambda _: decide(True))
     b_no.on_clicked(lambda _: decide(False))
     if pick:
-        ax.set_title(title + "\nclic gauche : centre de la gaussienne (sinon source du cas)")
+        box_x = TextBox(fig.add_axes([0.25, 0.10, 0.2, 0.05]), "x0 ")
+        box_y = TextBox(fig.add_axes([0.55, 0.10, 0.2, 0.05]), "y0 ")
+        box_x.on_submit(on_submit)
+        box_y.on_submit(on_submit)
+        ax.set_title(title + "\nclic gauche ou x0, y0 : centre de la gaussienne (sinon source du cas)")
         fig.canvas.mpl_connect("button_press_event", on_click)
-        print("Maillage affiché : cliquer dans Omega pour centrer une source gaussienne (facultatif), "
-              "puis sur « Valider » ou « Refuser ».")
+        print(f"Maillage affiché : cliquer dans Omega = [0, {hi_x:g}] x [0, {hi_y:g}] ou saisir x0, y0 "
+              "sous la figure (Entrée) pour centrer une source gaussienne (facultatif), "
+              "puis cliquer sur « Valider » ou « Refuser ».")
     else:
         print("Maillage affiché : cliquer sur « Valider » ou « Refuser ».")
     plt.show()
