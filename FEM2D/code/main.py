@@ -57,6 +57,8 @@ def parse_args():
         parser.error("--sigma : sigma doit être strictement positif")
     if min(args.h, args.h_beta, args.delta) <= 0:
         parser.error("--h, --h-beta, --delta : valeurs strictement positives attendues")
+    if args.raffinement < 0:
+        parser.error("--raffinement : valeur positive ou nulle attendue (0 : pas de raffinement)")
     if args.m_beta <= args.h / 2:
         parser.error(f"--m-beta : il faut m_beta > h/2 = {args.h / 2:g} "
                      "(sinon des cellules de la grille peuvent toucher beta)")
@@ -73,7 +75,7 @@ def parse_args():
 def main():
     args = parse_args()
     os.makedirs(OUT, exist_ok=True)
-    params = MeshParams(args.h, args.h_beta, args.delta, args.m_beta)
+    params = MeshParams(args.h, args.h_beta, args.delta, args.m_beta, args.raffinement)
     if args.components:
         choice = composed_case(args.components)
     elif args.step:

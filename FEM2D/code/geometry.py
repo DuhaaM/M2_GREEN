@@ -22,6 +22,7 @@ class Obstacle:
         self.pts_fine = self.gamma(self.t_fine)
         self.vertices = self.pts_fine  # échantillons de gamma (boîte englobante de beta)
         self.tree = cKDTree(self.pts_fine)
+        self.breakpoints = np.array([0.0, 2 * np.pi])  # gamma régulière : aucun coin
 
     def gamma(self, t):
         t = np.asarray(t, dtype=float)
@@ -81,6 +82,7 @@ class Polygon:
         self.lengths = lengths
         # Paramètre t_k du sommet k : abscisse curviligne ramenée à [0, 2pi)
         self.t_vertices = 2 * np.pi * np.concatenate(([0.0], np.cumsum(lengths))) / lengths.sum()
+        self.breakpoints = self.t_vertices  # sommets : toujours des nœuds de dbeta
         self.path = Path(closed, closed=True)
 
     def gamma(self, t):
@@ -135,6 +137,7 @@ class CurveObstacle:
         n_pts = np.cumsum([0] + [len(c) - 1 for c in curves])
         self.t_corners = self.t_fine[n_pts]  # début de chaque courbe, puis 2pi
         self.lengths = np.diff(s[n_pts])
+        self.breakpoints = self.t_corners  # extrémités des courbes : toujours des nœuds de dbeta
         self.path = Path(closed, closed=True)
         self.tree = cKDTree(pts)
 

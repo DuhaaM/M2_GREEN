@@ -286,7 +286,8 @@ def interactive(case, params, auto_accept=False, k=K, ask_source=True, sigma=SIG
     """
     while True:
         print(f"\n=== {case.name} : h = {params.h:g}, h_beta = {params.h_beta:g}, "
-              f"delta = {params.delta:g}, m_beta = {params.m_beta:g}, k = {k:g} ===")
+              f"delta = {params.delta:g}, m_beta = {params.m_beta:g}, "
+              f"raffinement = {params.raffinement:g}, k = {k:g} ===")
         try:
             mesh, Lx, Ly = prepare(case, params)
         except ValueError as err:

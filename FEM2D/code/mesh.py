@@ -11,6 +11,7 @@ import numpy as np
 from scipy import ndimage
 
 from assembly import check_jacobians
+from sizing import graded_params, size_field
 
 
 @dataclass
@@ -114,11 +115,13 @@ def inner_contours(keep):
 # ----------------------------------------------------------------------------
 # Étapes 3-4 : triangulation de la zone T avec gmsh (éléments d'ordre 1)
 # ----------------------------------------------------------------------------
-def triangulate(contour_xy, betas_xy, h, h_beta, delta):
+def triangulate(contour_xy, betas_xy, h, h_beta, delta, size=None):
     """Renvoie (node_xy, triangles, contour_nodes, beta_nodes) en indices locaux gmsh.
 
     betas_xy : liste des points de dbeta, un tableau par composante connexe de beta
     (chacune devient un trou de la zone T). beta_nodes suit la même structure.
+    size : taille du raffinement a priori (sizing.SizeField), ou None ; la taille de gmsh
+    est alors le minimum de celle-ci et du champ habituel (h_beta sur dbeta, h à distance delta).
     """
     gmsh.initialize()
     try:
@@ -156,6 +159,8 @@ def triangulate(contour_xy, betas_xy, h, h_beta, delta):
         field.setNumber(thr, "DistMin", 0.0)
         field.setNumber(thr, "DistMax", delta)
         field.setAsBackgroundMesh(thr)
+        if size is not None:
+            gmsh.model.mesh.setSizeCallback(lambda dim, tag, x, y, z, lc: min(lc, float(size([x, y])[0])))
         gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
         gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
         gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
@@ -183,7 +188,9 @@ def triangulate(contour_xy, betas_xy, h, h_beta, delta):
 # ----------------------------------------------------------------------------
 # Assemblage du maillage global (section 3.3)
 # ----------------------------------------------------------------------------
-def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
+def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
+    """Maillage mixte de D = Omega - beta ; refine > 0 : raffinement a priori (sizing.py) près
+    des interstices, des parties très courbes et des coins singuliers de dbeta."""
     nx, ny = int(round(Lx / h)), int(round(Ly / h))
     if abs(nx * h - Lx) > 1e-9 or abs(ny * h - Ly) > 1e-9:
         raise ValueError("Lx / h et Ly / h doivent être entiers.")
@@ -196,7 +203,11 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     loops, holes = inner_contours(keep)
     # Composantes connexes de beta (une seule pour Obstacle, Polygon, CurveObstacle)
     comps = getattr(obstacle, "components", [obstacle])
-    t_beta = [c.boundary_params(h_beta) for c in comps]
+    size = size_field(comps, obstacle.inside, h_beta, refine)
+    if size is None:
+        t_beta = [c.boundary_params(h_beta) for c in comps]
+    else:
+        t_beta = [graded_params(c, lambda p: np.minimum(h_beta, size(p))) for c in comps]
     beta_xy = [c.gamma(t) for c, t in zip(comps, t_beta)]
     # Trou de Q contenant chaque composante (repéré par la cellule d'un point de son bord)
     members = [[] for _ in loops]
@@ -233,7 +244,7 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta):
     for loop, cs in zip(loops, members):
         contour_xy = [(i * h, j * h) for i, j in loop]
         node_xy, tri3, contour_nodes, beta_nodes = triangulate(
-            contour_xy, [beta_xy[c] for c in cs], h, h_beta, delta)
+            contour_xy, [beta_xy[c] for c in cs], h, h_beta, delta, size)
         g2glob = -np.ones(len(node_xy), dtype=int)
         for (i, j), g in zip(loop, contour_nodes):
             g2glob[g] = vid[i, j]

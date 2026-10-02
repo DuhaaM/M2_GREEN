@@ -22,6 +22,7 @@ POLYGON = [(2.0, 1.5), (2.0, 3.5), (3.0, 3.5), (3.0, 2.5), (5.0, 2.5), (5.0, 1.5
 STEP = os.path.join(HERE, "cao", "obstacle.step")
 PUZZLE = os.path.join(HERE, "cao", "Puzzle.step")
 DEUX = os.path.join(HERE, "cao", "deux_obstacles.step")  # beta non connexe, composantes proches
+TANGENTS = os.path.join(HERE, "cao", "disques_tangents.step")  # deux disques à 0.05 l'un de l'autre
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,8 @@ CASES = {
                          "puzzle", "_gauss", f=f_gauss),
     "non_connexe": Case("beta non connexe (deux_obstacles.step)", partial(from_step, DEUX),
                         "non_connexe"),
+    "tangents": Case("deux disques presque tangents (disques_tangents.step)", partial(from_step, TANGENTS),
+                     "tangents"),
     "eloignes": Case("trois obstacles éloignés, u = g_beta = 1 + x/Lx sur dbeta",
                      obstacles_eloignes, "eloignes", g_beta=g_dirichlet),
 }
@@ -200,7 +203,8 @@ def composed_case(specs):
 def prepare(case, params):
     """Omega construit autour de beta, puis maillage : (mesh, Lx, Ly)."""
     obstacle, Lx, Ly, _ = domain_from_obstacle(case.make(), params.h, params.d_min, params.m_beta)
-    mesh = build_mesh(obstacle, Lx, Ly, params.h, params.h_beta, params.delta, params.m_beta)
+    mesh = build_mesh(obstacle, Lx, Ly, params.h, params.h_beta, params.delta, params.m_beta,
+                      params.raffinement)
     return mesh, Lx, Ly
 
 

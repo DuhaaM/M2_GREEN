@@ -15,6 +15,7 @@ def out_path(folder, name):
 # Omega du cas de validation et paramètres de maillage par défaut
 LX, LY = 7.0, 5.0
 H, H_BETA, DELTA, M_BETA = 0.5, 0.15, 0.8, 1
+RAFFINEMENT = 1.0  # intensité du raffinement a priori près de beta (0 : aucun), voir sizing.py
 K = 1.0  # coefficient de réaction de -Δu + k u = f
 SIGMA = 0.5  # écart-type par défaut de la source gaussienne
 
@@ -25,6 +26,7 @@ class MeshParams:
     h_beta: float = H_BETA
     delta: float = DELTA
     m_beta: float = M_BETA
+    raffinement: float = RAFFINEMENT
 
     @property
     def d_min(self):
