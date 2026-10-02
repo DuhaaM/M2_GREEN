@@ -1273,6 +1273,22 @@ $f = 1$ et $g_\beta(x,y) = 1 + x / L_x$ sur $\partial\beta$ : $u_h$ doit
 valoir $g_\beta$ sur $\partial\beta$, s'annuler sur $\partial\Omega$ et
 décroître régulièrement entre les deux.
 
+Pour une source localisée, on remplace $f = 1$ par une gaussienne
+\[
+f(x, y) = \exp\!\Big( -\frac{(x - x_0)^2 + (y - y_0)^2}{2\sigma^2} \Big),
+\]
+qui vaut $1$ en son centre $(x_0, y_0)$ ($\sigma = 0.5$ par défaut). Le
+centre doit être dans $D = \Omega \setminus \beta$ : un centre hors de
+$\Omega$ ou dans $\beta$ (tel que maillé) est refusé. Le cas
+\texttt{puzzle\_gauss} prend $(x_0, y_0) = (L_x / 4, 3 L_y / 4)$, hors de
+$\beta$ ; pour les autres cas le centre se choisit au lancement
+(section~\ref{sec:usage}). $u_h$ doit être maximale près de $(x_0, y_0)$ et
+décroître vers $\partial D$. Pour la pièce de puzzle :
+
+\begin{center}
+\includegraphics[width=0.7\textwidth]{code/resultats/puzzle/solution_gauss.png}
+\end{center}
+
 \section{Paramètres et sorties attendues}
 
 \subsection{Paramètres par défaut}
@@ -1326,12 +1342,23 @@ construit $\Omega$ autour de $\beta$ (section~\ref{sec:omega}, avec
 $d_{\min} = m_\beta + 4h$), puis le maillage, affiche le nombre de nœuds,
 de triangles et de quadrilatères, et montre le maillage dans une fenêtre
 avec deux boutons \og Valider \fg{} et \og Refuser \fg{}. L'assemblage et la
-résolution (pour $f = 1$) ne sont lancés qu'après validation. En cas de
+résolution ne sont lancés qu'après validation. En cas de
 refus ou d'échec du maillage, on peut modifier les paramètres $h$,
 $h_\beta$, $\delta$, $m_\beta$ (Entrée conserve la valeur courante), changer
 d'obstacle ou quitter. Sans affichage disponible (\emph{backend}
 \texttt{matplotlib} non interactif), le maillage est écrit dans
 \texttt{resultats/} et la validation se fait au clavier.
+
+\paragraph{Choix de la source.} Dans la fenêtre du maillage, un clic gauche
+dans $D$ place le centre $(x_0, y_0)$ d'une source gaussienne
+$f(x_0, y_0) = 1$ (croix et cercle de rayon $\sigma$ tracés en rouge), un
+clic droit l'annule ; sans clic, la source du cas est conservée ($f = 1$,
+ou la gaussienne de \texttt{puzzle\_gauss}). Un clic hors de $\Omega$ ou
+dans $\beta$ est signalé en rouge dans le titre et ignoré. Sans affichage,
+la question est posée au terminal après validation : Entrée garde la source
+du cas, \texttt{g} demande $x_0$, $y_0$ (redemandés tant que le point n'est
+pas dans $D$) et $\sigma$. Avec \texttt{--gauss} ou \texttt{-y}, rien n'est
+demandé.
 
 \paragraph{Ligne de commande.}
 \begin{center}
@@ -1343,11 +1370,14 @@ Commande & Effet \\
 \texttt{python3 main.py \textit{cas}} & cas prédéfini : \texttt{disque}, \texttt{cacahuete},
                                         \texttt{cacahuete\_dirichlet}, \\
                                       & \texttt{polygone}, \texttt{step}, \texttt{puzzle},
-                                        \texttt{non\_connexe}, \texttt{eloignes} \\
+                                        \texttt{puzzle\_gauss}, \\
+                                      & \texttt{non\_connexe}, \texttt{eloignes} \\
 \texttt{python3 main.py --step f.step} & obstacle lu dans un fichier STEP / IGES / BREP
                                          (\texttt{--echelle}) \\
 \texttt{python3 main.py --obstacle \dots} & $\beta$ composé, option à répéter
                                             pour chaque composante \\
+\texttt{python3 main.py \textit{cas} --gauss $x_0$ $y_0$} & source gaussienne
+                                        $f(x_0, y_0) = 1$ (\texttt{--sigma}) \\
 \texttt{python3 main.py validation} & étude de convergence (section~\ref{sec:validation}) \\
 \texttt{python3 main.py erreurs} & erreur de chaque élément du cas de validation \\
                                   & (pas \texttt{--h}), carte cliquable \\
@@ -1360,7 +1390,9 @@ Les options \texttt{--h}, \texttt{--h-beta}, \texttt{--delta} et
 \texttt{--m-beta} changent les paramètres de maillage, \texttt{--k} le
 coefficient $k \ge 0$ de l'équation (1 par défaut ; pour une autre valeur,
 les figures de solution et de validation prennent le suffixe
-\texttt{\_k<valeur>}), et \texttt{-y}
+\texttt{\_k<valeur>}), \texttt{--gauss} $x_0$ $y_0$ et \texttt{--sigma}
+(défaut $0.5$, $\sigma > 0$) la source gaussienne, dont le centre est
+vérifié après le maillage (erreur s'il n'est pas dans $D$), et \texttt{-y}
 (\texttt{--oui}) valide le maillage sans l'afficher. Dans le mode
 \texttt{tous} et pour l'étude de convergence, chaque calcul tourne dans son
 propre processus (\texttt{ProcessPoolExecutor}), sans fenêtre.
@@ -1398,7 +1430,7 @@ section~\ref{sec:construction} que les composantes soient proches ou
 composante (Entrée : valeur par défaut ; les composantes sont placées côte
 à côte par défaut, $x = 4k$ pour la $k$-ième). Après chaque ajout ou retrait,
 le maillage est recalculé et affiché sans bloquer (ou écrit dans
-\texttt{maillage\_compose\_$p$.png}, $p$ étant le nombre de composantes) ;
+\texttt{compose/apercu\_$p$.png}, $p$ étant le nombre de composantes) ;
 une composante qui fait échouer le maillage n'est pas ajoutée. On termine
 avec \texttt{t}, puis le maillage final passe par la validation décrite
 ci-dessus.
@@ -1406,29 +1438,34 @@ ci-dessus.
 \subsection{Sorties}
 
 \begin{itemize}
-  \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$
-        pour la cacahuète. Les autres cas ajoutent un suffixe :
-        \texttt{\_disque}, \texttt{\_dirichlet} (cacahuète avec
-        $u = g_\beta$ sur $\partial\beta$), \texttt{\_polygone},
-        \texttt{\_step}, \texttt{\_puzzle}, \texttt{\_non\_connexe},
-        \texttt{\_eloignes}, \texttt{\_compose\_<types>\_<empreinte>}
-        (obstacle composé, l'empreinte distinguant deux jeux de paramètres) et le
-        nom du fichier en minuscules pour \texttt{--step} (suivi de
-        \texttt{\_x<échelle>} si l'échelle n'est pas 1) ; de même pour
-        \texttt{solution*.png}.
-  \item \texttt{solution.png} : $u_h$ en couleurs. Pour l'affichage, chaque
+  \item Les figures sont rangées dans \texttt{resultats/}, un sous-dossier
+        par obstacle : \texttt{disque}, \texttt{cacahuete}, \texttt{polygone},
+        \texttt{step}, \texttt{puzzle}, \texttt{non\_connexe},
+        \texttt{eloignes}, \texttt{compose/<types>\_<empreinte>} (obstacle
+        composé, l'empreinte distinguant deux jeux de paramètres) et le nom
+        du fichier en minuscules pour \texttt{--step} (suivi de
+        \texttt{\_x<échelle>} si l'échelle n'est pas 1). Les figures du cas de
+        validation sont dans \texttt{validation/}.
+  \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$,
+        un seul par obstacle.
+  \item \texttt{solution.png} : $u_h$ en couleurs, avec un suffixe pour les
+        variantes du cas : \texttt{\_dirichlet} (cacahuète avec
+        $u = g_\beta$ sur $\partial\beta$), \texttt{\_gauss}
+        (\texttt{puzzle\_gauss}), \texttt{\_gauss\_$x_0$\_$y_0$\_s$\sigma$}
+        (source gaussienne choisie), puis \texttt{\_k<valeur>} si $k \ne 1$.
+        Le cas de validation donne \texttt{validation/solution.png}. Pour l'affichage, chaque
         triangle $P_2$ est découpé en 4 sous-triangles et chaque carré $Q_2$
         en 8 à l'aide des nœuds milieux, puis on trace le résultat avec
         \texttt{matplotlib.pyplot.tripcolor}. Une triangulation de Delaunay
         de tous les nœuds ne convient pas : elle traverserait $\beta$.
-  \item \texttt{erreurs\_elements.png} : carte des densités
+  \item \texttt{validation/erreurs\_elements.png} : carte des densités
         $e_K / \sqrt{|K|}$ du cas de validation (échelle logarithmique). En
         mode interactif, un clic sur un élément affiche $|K|$, $e_K$ et
         $e_K / \sqrt{|K|}$ en $L^2$ et en $H^1$, l'écart à la moyenne de son
         type ($\mathcal{T}$ ou $\mathcal{Q}$) en nombre d'écarts-types, et
         l'écart-type de $u_{\mathrm{ex}} - u_h$ aux points de quadrature de
         $K$ ; des boutons choisissent la norme affichée.
-  \item \texttt{convergence.png} : erreurs $L^2$ et $H^1$ en fonction de
+  \item \texttt{validation/convergence.png} : erreurs $L^2$ et $H^1$ en fonction de
         $h$ en échelle log--log, avec des droites de pente 3 et 2.
   \item Dans le terminal : le nombre de nœuds, de triangles et de
         quadrilatères, puis un tableau $h$, erreur $L^2$, ordre, erreur
