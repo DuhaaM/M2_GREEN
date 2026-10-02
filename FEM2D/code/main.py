@@ -234,6 +234,20 @@ def with_gauss(case, x0, y0, sigma=SIGMA):
                    suffix=f"{case.suffix}_gauss_{x0:g}_{y0:g}_s{sigma:g}")
 
 
+def gauss_center(case):
+    """Centre (x0, y0) choisi pour la source gaussienne du cas, None s'il n'y en a pas."""
+    return case.f.keywords.get("center") if isinstance(case.f, partial) else None
+
+
+def center_error(mesh, Lx, Ly, x0, y0):
+    """Message d'erreur si (x0, y0) n'est pas dans D = Omega - beta (beta tel que maillé), None sinon."""
+    if not (0 <= x0 <= Lx and 0 <= y0 <= Ly):
+        return f"le point ({x0:g}, {y0:g}) est hors de Omega = [0, {Lx:g}] x [0, {Ly:g}]"
+    if any(Path(xy).contains_point((x0, y0)) for xy in mesh.beta_points):
+        return f"le point ({x0:g}, {y0:g}) est dans l'obstacle beta"
+    return None
+
+
 def obstacles_eloignes():
     """beta non connexe, composantes assez éloignées pour être dans des zones T distinctes."""
     return MultiObstacle([disk((0.0, 0.0), 0.8),
@@ -752,7 +766,7 @@ def review_mesh(mesh, case, pick=False, sigma=SIGMA):
         plt.close(fig)
 
     ax = fig.axes[0]
-    (lo_x, lo_y), (hi_x, hi_y) = mesh.coords.min(axis=0), mesh.coords.max(axis=0)
+    hi_x, hi_y = mesh.coords.max(axis=0)  # Omega = [0, Lx] x [0, Ly]
     title = ax.get_title()
     mark = ax.plot([], [], "+", color="tab:red", ms=14, mew=2, zorder=5)[0]
     disc = MplCircle((0, 0), sigma, fill=False, ls="--", color="tab:red", visible=False, zorder=5)
@@ -765,14 +779,20 @@ def review_mesh(mesh, case, pick=False, sigma=SIGMA):
             decision.pop("center", None)
             mark.set_data([], [])
             disc.set_visible(False)
-            ax.set_title(title + "\nsource du cas (clic gauche : centre de la gaussienne)")
-        elif event.button == 1 and lo_x <= event.xdata <= hi_x and lo_y <= event.ydata <= hi_y:
+            ax.set_title(title + "\nsource du cas (clic gauche : centre de la gaussienne)", color="black")
+        elif event.button == 1:
+            err = center_error(mesh, hi_x, hi_y, event.xdata, event.ydata)
+            if err:
+                print(f"Erreur : {err}, centre non retenu.")
+                ax.set_title(title + f"\nErreur : {err}", color="tab:red")
+                fig.canvas.draw_idle()
+                return
             x0, y0 = decision["center"] = (event.xdata, event.ydata)
             mark.set_data([x0], [y0])
             disc.center = (x0, y0)
             disc.set_visible(True)
             ax.set_title(title + f"\nf gaussienne, f({x0:.3g}, {y0:.3g}) = 1, σ = {sigma:g} "
-                                 "(clic droit : annuler)")
+                                 "(clic droit : annuler)", color="black")
         fig.canvas.draw_idle()
 
     fig.subplots_adjust(bottom=0.14)
@@ -806,15 +826,20 @@ def ask_float(prompt, default, lo=-np.inf, hi=np.inf):
         print(f"  Valeur attendue dans [{lo:g}, {hi:g}].")
 
 
-def ask_gauss(case, Lx, Ly):
+def ask_gauss(case, mesh, Lx, Ly):
     """Choix de la source : celle du cas, ou une gaussienne f(x0, y0) = 1 de centre choisi dans Omega."""
     current = "gaussienne" if case.f else "f = 1"
     answer = ask(f"Source : [Entrée] celle du cas ({current}), [g] gaussienne centrée en (x0, y0) : ")
     if not answer.lower().startswith("g"):
         return case
     print(f"  Omega = [0, {Lx:g}] x [0, {Ly:g}]")
-    x0 = ask_float("  x0", Lx / 2, 0, Lx)
-    y0 = ask_float("  y0", Ly / 2, 0, Ly)
+    while True:
+        x0 = ask_float("  x0", Lx / 2, 0, Lx)
+        y0 = ask_float("  y0", Ly / 2, 0, Ly)
+        err = center_error(mesh, Lx, Ly, x0, y0)
+        if not err:
+            break
+        print(f"  Erreur : {err}, choisir un autre point.")
     sigma = ask_float("  sigma", SIGMA, 1e-12)
     return with_gauss(case, x0, y0, sigma)
 
@@ -831,13 +856,17 @@ def interactive(case, params, auto_accept=False, k=K, ask_source=True, sigma=SIG
             accepted = False
         else:
             print(mesh_summary(mesh, Lx, Ly))
+            if gauss_center(case) is not None:
+                err = center_error(mesh, Lx, Ly, *gauss_center(case))
+                if err:
+                    raise SystemExit(f"Erreur : --gauss : {err}.")
             accepted, center = (True, None) if auto_accept else review_mesh(mesh, case, ask_source, sigma)
         if accepted:
             if center is not None:  # centre cliqué sur le maillage
                 case = with_gauss(case, *center, sigma)
                 print(f"Source gaussienne : f({center[0]:.4g}, {center[1]:.4g}) = 1, sigma = {sigma:g}")
             elif ask_source and matplotlib.get_backend().lower() in NON_INTERACTIVE:
-                case = ask_gauss(case, Lx, Ly)  # pas de fenêtre où cliquer : question au terminal
+                case = ask_gauss(case, mesh, Lx, Ly)  # pas de fenêtre où cliquer : question au terminal
             print("Maillage validé : assemblage et résolution...")
             print(compute(case, mesh, Lx, Ly, k))
             return
