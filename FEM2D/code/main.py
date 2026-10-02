@@ -9,9 +9,12 @@ Sections 6 et 7 de main.tex. Lancer :
     python3 main.py --step fichier.step   obstacle lu dans un fichier CAO
     python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0
                                           plusieurs obstacles, type choisi pour chacun
+    python3 main.py puzzle --gauss 2 3    f gaussienne avec f(2, 3) = 1 (option --sigma)
     python3 main.py tous                  tous les cas en parallèle, sans validation du maillage
     python3 main.py erreurs --h 0.25      erreur de chaque élément (cas de validation), au clic
-Le maillage est affiché et doit être validé avant l'assemblage et la résolution.
+Le maillage est affiché et doit être validé avant l'assemblage et la résolution ; la source f
+(celle du cas, ou une gaussienne f(x0, y0) = 1) se choisit en cliquant (x0, y0) sur le maillage,
+ou à défaut au terminal après validation.
 Les figures sont écrites dans le dossier resultats/ à côté de ce fichier
 (suffixe _k<valeur> pour les solutions et la validation si k n'est pas 1).
 """
@@ -19,7 +22,7 @@ import argparse
 import hashlib
 import os
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import Callable, Optional
 
@@ -27,7 +30,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.colors import LogNorm
-from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.patches import Circle as MplCircle, Polygon as MplPolygon
 from matplotlib.path import Path
 from matplotlib.tri import Triangulation
 from matplotlib.widgets import Button, RadioButtons
@@ -205,11 +208,21 @@ def g_polygon(Lx, Ly):
     return lambda x, y: np.exp(0.1 * (x - y))
 
 
-def f_gauss(Lx, Ly, sigma=0.5):
-    """Source gaussienne centrée en (Lx/4, 3Ly/4), hors de beta pour les cas centrés."""
-    x0, y0 = Lx / 4, 3 * Ly / 4
+SIGMA = 0.5  # écart-type par défaut de la source gaussienne
+
+
+def f_gauss(Lx, Ly, sigma=SIGMA, center=None):
+    """Source gaussienne f(x0, y0) = 1, centrée en center (coordonnées de Omega = [0, Lx] x [0, Ly]),
+    ou par défaut en (Lx/4, 3Ly/4), hors de beta pour les cas centrés."""
+    x0, y0 = center if center is not None else (Lx / 4, 3 * Ly / 4)
     return (lambda x, y: np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2)),
             rf"$f = e^{{-|x - x_0|^2 / 2\sigma^2}}$, $x_0 = ({x0:g}, {y0:g})$, $\sigma = {sigma:g}$")
+
+
+def with_gauss(case, x0, y0, sigma=SIGMA):
+    """Le même cas avec f gaussienne centrée en (x0, y0) ; suffixe des figures complété."""
+    return replace(case, f=partial(f_gauss, sigma=sigma, center=(x0, y0)),
+                   suffix=f"{case.suffix}_gauss_{x0:g}_{y0:g}_s{sigma:g}")
 
 
 def obstacles_eloignes():
@@ -712,15 +725,16 @@ def ask_params(params):
     return MeshParams(**values)
 
 
-def review_mesh(mesh, case):
-    """Affiche le maillage et renvoie True s'il est validé."""
+def review_mesh(mesh, case, pick=False, sigma=SIGMA):
+    """Affiche le maillage et renvoie (validé, centre). Si pick, un clic gauche dans Omega choisit
+    le centre (x0, y0) de la source gaussienne (clic droit : annulé) ; centre = None sinon."""
     path = os.path.join(OUT, f"maillage{case.suffix}.png")
     fig = mesh_figure(mesh)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     if matplotlib.get_backend().lower() in NON_INTERACTIVE:
         plt.close(fig)
         print(f"Pas d'affichage disponible : maillage enregistré dans {path}")
-        return ask("Valider ce maillage ? [o/n] : ", "n").lower().startswith("o")
+        return ask("Valider ce maillage ? [o/n] : ", "n").lower().startswith("o"), None
 
     decision = {}
 
@@ -728,19 +742,75 @@ def review_mesh(mesh, case):
         decision["ok"] = accepted
         plt.close(fig)
 
+    ax = fig.axes[0]
+    (lo_x, lo_y), (hi_x, hi_y) = mesh.coords.min(axis=0), mesh.coords.max(axis=0)
+    title = ax.get_title()
+    mark = ax.plot([], [], "+", color="tab:red", ms=14, mew=2, zorder=5)[0]
+    disc = MplCircle((0, 0), sigma, fill=False, ls="--", color="tab:red", visible=False, zorder=5)
+    ax.add_patch(disc)
+
+    def on_click(event):
+        if event.inaxes is not ax or fig.canvas.toolbar is not None and fig.canvas.toolbar.mode:
+            return  # boutons, ou zoom / déplacement en cours
+        if event.button == 3:
+            decision.pop("center", None)
+            mark.set_data([], [])
+            disc.set_visible(False)
+            ax.set_title(title + "\nsource du cas (clic gauche : centre de la gaussienne)")
+        elif event.button == 1 and lo_x <= event.xdata <= hi_x and lo_y <= event.ydata <= hi_y:
+            x0, y0 = decision["center"] = (event.xdata, event.ydata)
+            mark.set_data([x0], [y0])
+            disc.center = (x0, y0)
+            disc.set_visible(True)
+            ax.set_title(title + f"\nf gaussienne, f({x0:.3g}, {y0:.3g}) = 1, σ = {sigma:g} "
+                                 "(clic droit : annuler)")
+        fig.canvas.draw_idle()
+
     fig.subplots_adjust(bottom=0.14)
     b_ok = Button(fig.add_axes([0.25, 0.02, 0.2, 0.06]), "Valider", color="#b8e0b8", hovercolor="#8fd08f")
     b_no = Button(fig.add_axes([0.55, 0.02, 0.2, 0.06]), "Refuser", color="#f0b8b8", hovercolor="#e89090")
     b_ok.on_clicked(lambda _: decide(True))
     b_no.on_clicked(lambda _: decide(False))
-    print("Maillage affiché : cliquer sur « Valider » ou « Refuser ».")
+    if pick:
+        ax.set_title(title + "\nclic gauche : centre de la gaussienne (sinon source du cas)")
+        fig.canvas.mpl_connect("button_press_event", on_click)
+        print("Maillage affiché : cliquer dans Omega pour centrer une source gaussienne (facultatif), "
+              "puis sur « Valider » ou « Refuser ».")
+    else:
+        print("Maillage affiché : cliquer sur « Valider » ou « Refuser ».")
     plt.show()
     if "ok" not in decision:  # fenêtre fermée sans cliquer
-        return ask("Valider ce maillage ? [o/n] : ", "n").lower().startswith("o")
-    return decision["ok"]
+        decision["ok"] = ask("Valider ce maillage ? [o/n] : ", "n").lower().startswith("o")
+    return decision["ok"], decision.get("center")
 
 
-def interactive(case, params, auto_accept=False, k=K):
+def ask_float(prompt, default, lo=-np.inf, hi=np.inf):
+    while True:
+        answer = ask(f"{prompt} [{default:g}] : ")
+        try:
+            value = float(answer) if answer else default
+        except ValueError:
+            print("  Nombre attendu.")
+            continue
+        if lo <= value <= hi:
+            return value
+        print(f"  Valeur attendue dans [{lo:g}, {hi:g}].")
+
+
+def ask_gauss(case, Lx, Ly):
+    """Choix de la source : celle du cas, ou une gaussienne f(x0, y0) = 1 de centre choisi dans Omega."""
+    current = "gaussienne" if case.f else "f = 1"
+    answer = ask(f"Source : [Entrée] celle du cas ({current}), [g] gaussienne centrée en (x0, y0) : ")
+    if not answer.lower().startswith("g"):
+        return case
+    print(f"  Omega = [0, {Lx:g}] x [0, {Ly:g}]")
+    x0 = ask_float("  x0", Lx / 2, 0, Lx)
+    y0 = ask_float("  y0", Ly / 2, 0, Ly)
+    sigma = ask_float("  sigma", SIGMA, 1e-12)
+    return with_gauss(case, x0, y0, sigma)
+
+
+def interactive(case, params, auto_accept=False, k=K, ask_source=True, sigma=SIGMA):
     """Maillage -> validation -> calcul. En cas de refus : autres paramètres ou autre obstacle."""
     while True:
         print(f"\n=== {case.name} : h = {params.h:g}, h_beta = {params.h_beta:g}, "
@@ -752,8 +822,13 @@ def interactive(case, params, auto_accept=False, k=K):
             accepted = False
         else:
             print(mesh_summary(mesh, Lx, Ly))
-            accepted = auto_accept or review_mesh(mesh, case)
+            accepted, center = (True, None) if auto_accept else review_mesh(mesh, case, ask_source, sigma)
         if accepted:
+            if center is not None:  # centre cliqué sur le maillage
+                case = with_gauss(case, *center, sigma)
+                print(f"Source gaussienne : f({center[0]:.4g}, {center[1]:.4g}) = 1, sigma = {sigma:g}")
+            elif ask_source and matplotlib.get_backend().lower() in NON_INTERACTIVE:
+                case = ask_gauss(case, Lx, Ly)  # pas de fenêtre où cliquer : question au terminal
             print("Maillage validé : assemblage et résolution...")
             print(compute(case, mesh, Lx, Ly, k))
             return
@@ -779,12 +854,18 @@ def parse_args():
                              "polygone x y [x1 y1 ...] | fichier chemin x y [echelle]")
     parser.add_argument("--echelle", type=float, default=1.0, help="facteur d'échelle du fichier CAO")
     parser.add_argument("--k", type=float, default=K, help=f"coefficient k >= 0 de -Δu + k u = f [{K:g}]")
+    parser.add_argument("--gauss", nargs=2, type=float, metavar=("X0", "Y0"),
+                        help="f gaussienne avec f(X0, Y0) = 1, centre dans Omega = [0, Lx] x [0, Ly] "
+                             "(sans cette option, la source est demandée après validation du maillage)")
+    parser.add_argument("--sigma", type=float, default=SIGMA, help=f"écart-type de la gaussienne [{SIGMA:g}]")
     parser.add_argument("-y", "--oui", action="store_true", help="valider le maillage sans l'afficher")
     for name, value in vars(MeshParams()).items():
         parser.add_argument(f"--{name.replace('_', '-')}", type=float, default=value, dest=name)
     args = parser.parse_args()
     if args.k < 0:
         parser.error("--k : k doit être positif ou nul (sinon a n'est plus coercive)")
+    if args.sigma <= 0:
+        parser.error("--sigma : sigma doit être strictement positif")
     for spec in args.components or []:
         try:
             check_spec(spec)
@@ -808,7 +889,10 @@ if __name__ == "__main__":
     else:
         choice = choose_case(params)
     if isinstance(choice, Case):
-        choice = interactive(choice, params, args.oui, args.k)
+        if args.gauss:
+            choice = with_gauss(choice, *args.gauss, args.sigma)
+        choice = interactive(choice, params, args.oui, args.k, ask_source=not (args.gauss or args.oui),
+                             sigma=args.sigma)
     if choice == "validation":
         run_convergence(args.k)
     elif choice == "tous":
