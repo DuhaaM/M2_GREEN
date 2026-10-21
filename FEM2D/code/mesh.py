@@ -220,23 +220,21 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
             raise ValueError(f"La composante {c + 1} de beta est à cheval sur plusieurs trous de Q.")
         members[hole[0] - 1].append(c)
 
-    coords = []            # coordonnées de tous les nœuds
-    on_beta = []           # nœud situé sur dbeta
-    beta_index = {}        # numéro global -> (composante c, indice k du point gamma_c(t_k))
-
-    def new_node(xy, is_beta=False):
-        coords.append(xy)
-        on_beta.append(is_beta)
-        return len(coords) - 1
+    # Les nœuds sont créés par blocs (sommets de Q, nœuds de T, milieux, centres) :
+    # coords est la concaténation des blocs, n le nombre de nœuds déjà créés
+    coords = []
+    beta_glob = [None] * len(comps)  # numéros globaux des points gamma_c(t_k), par composante
 
     # 1. Sommets de la grille utilisés par Q
     used = np.zeros((nx + 1, ny + 1), dtype=bool)
     ci, cj = np.nonzero(keep)
     for di, dj in [(0, 0), (1, 0), (1, 1), (0, 1)]:
         used[ci + di, cj + dj] = True
+    vi, vj = np.nonzero(used)
     vid = -np.ones((nx + 1, ny + 1), dtype=int)
-    for i, j in zip(*np.nonzero(used)):
-        vid[i, j] = new_node((i * h, j * h))
+    vid[vi, vj] = np.arange(len(vi))
+    coords.append(h * np.column_stack((vi, vj)).astype(float))
+    n = len(vi)
 
     # 2. Sommets des triangles, une zone T par trou de Q : ceux des contours
     #    reprennent les numéros existants
@@ -246,66 +244,66 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
         node_xy, tri3, contour_nodes, beta_nodes = triangulate(
             contour_xy, [beta_xy[c] for c in cs], h, h_beta, delta, size)
         g2glob = -np.ones(len(node_xy), dtype=int)
-        for (i, j), g in zip(loop, contour_nodes):
-            g2glob[g] = vid[i, j]
+        li, lj = np.array(loop).T
+        g2glob[contour_nodes] = vid[li, lj]
         for c, nodes in zip(cs, beta_nodes):
-            for k, g in enumerate(nodes):
-                g2glob[g] = new_node(tuple(beta_xy[c][k]), is_beta=True)
-                beta_index[g2glob[g]] = (c, k)
-        for g in np.nonzero(g2glob < 0)[0]:
-            g2glob[g] = new_node(tuple(node_xy[g]))
+            beta_glob[c] = g2glob[nodes] = n + np.arange(len(nodes))
+            coords.append(beta_xy[c])
+            n += len(nodes)
+        free = np.nonzero(g2glob < 0)[0]
+        g2glob[free] = n + np.arange(len(free))
+        coords.append(node_xy[free])
+        n += len(free)
         tri_parts.append(g2glob[tri3])
     tri3 = np.vstack(tri_parts)
+    P = np.vstack(coords)
 
     # Orientation directe des triangles
-    P = np.array(coords)
     e1 = P[tri3[:, 1]] - P[tri3[:, 0]]
     e2 = P[tri3[:, 2]] - P[tri3[:, 0]]
     neg = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0] < 0
     tri3[neg] = tri3[neg][:, [0, 2, 1]]
 
-    # 3. Milieux d'arêtes (dictionnaire d'arêtes)
-    edge_mid = {}
-
-    def midpoint(a, b):
-        key = (min(a, b), max(a, b))
-        if key in edge_mid:
-            return edge_mid[key]
-        if a in beta_index and b in beta_index and beta_index[a][0] == beta_index[b][0]:
-            (c, ka), (_, kb) = beta_index[a], beta_index[b]
-            n_beta = len(t_beta[c])
-            if (ka - kb) % n_beta == 1:
-                ka, kb = kb, ka
-            if (kb - ka) % n_beta == 1:  # arête posée sur dbeta
-                ta, tb = t_beta[c][ka], t_beta[c][kb]
-                if kb == 0:
-                    tb += 2 * np.pi
-                m = new_node(tuple(comps[c].gamma([0.5 * (ta + tb)])[0]), is_beta=True)
-                edge_mid[key] = m
-                return m
-        m = new_node(tuple(0.5 * (np.array(coords[a]) + np.array(coords[b]))))
-        edge_mid[key] = m
-        return m
-
-    tri = np.empty((len(tri3), 6), dtype=int)
-    tri[:, :3] = tri3
-    for e, (a, b, c) in enumerate(tri3):
-        tri[e, 3:] = midpoint(a, b), midpoint(b, c), midpoint(c, a)
+    # 3. Milieux d'arêtes : toutes les arêtes des éléments, dédoublonnées par np.unique
+    #    sur la clé a n + b (a < b) ; inv donne le milieu de chaque arête de chaque élément.
+    #    Triangles : (0, 1), (1, 2), (2, 0) ; quadrilatères : bas, droite, haut, gauche
+    q4 = np.column_stack((vid[ci, cj], vid[ci + 1, cj], vid[ci + 1, cj + 1], vid[ci, cj + 1]))
+    edges = np.vstack((tri3[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2),
+                       q4[:, [0, 1, 1, 2, 2, 3, 3, 0]].reshape(-1, 2)))
+    edges.sort(axis=1)
+    key, inv = np.unique(edges[:, 0] * n + edges[:, 1], return_inverse=True)
+    a, b = np.divmod(key, n)
+    mid_xy = 0.5 * (P[a] + P[b])
+    mid_on_beta = np.zeros(len(key), dtype=bool)
+    # Arête posée sur dbeta : extrémités gamma_c(t_k) et gamma_c(t_{k+1}), milieu pris sur la courbe
+    comp_of, k_of = -np.ones(n, dtype=int), np.zeros(n, dtype=int)
+    for c, nodes in enumerate(beta_glob):
+        comp_of[nodes], k_of[nodes] = c, np.arange(len(nodes))
+    for c, t in enumerate(t_beta):
+        sel = np.nonzero((comp_of[a] == c) & (comp_of[b] == c))[0]
+        ka, kb = k_of[a[sel]], k_of[b[sel]]
+        forward, backward = (kb - ka) % len(t) == 1, (ka - kb) % len(t) == 1
+        on_curve = forward | backward
+        sel, lo = sel[on_curve], np.where(forward, ka, kb)[on_curve]
+        hi = (lo + 1) % len(t)
+        t_mid = 0.5 * (t[lo] + t[hi] + 2 * np.pi * (hi == 0))
+        mid_xy[sel] = comps[c].gamma(t_mid)
+        mid_on_beta[sel] = True
+    mid_id = n + inv.ravel()
+    n_tri = len(tri3)
+    tri = np.column_stack((tri3, mid_id[:3 * n_tri].reshape(-1, 3)))
 
     # 4. Quadrilatères Q2 : sommets, milieux (bas, droite, haut, gauche), centre
-    quad = np.empty((len(ci), 9), dtype=int)
-    for e, (i, j) in enumerate(zip(ci, cj)):
-        v = [vid[i, j], vid[i + 1, j], vid[i + 1, j + 1], vid[i, j + 1]]
-        quad[e, :4] = v
-        quad[e, 4:8] = [midpoint(v[k], v[(k + 1) % 4]) for k in range(4)]
-        quad[e, 8] = new_node(((i + 0.5) * h, (j + 0.5) * h))
+    n_mid = n + len(key)
+    quad = np.column_stack((q4, mid_id[3 * n_tri:].reshape(-1, 4), n_mid + np.arange(len(ci))))
+    centers = h * (np.column_stack((ci, cj)) + 0.5)
 
     # 5. Nœuds de bord
-    coords = np.array(coords)
+    coords = np.vstack((P, mid_xy, centers))
     tol = 1e-10 * h
     x, y = coords[:, 0], coords[:, 1]
     on_omega = (np.abs(x) < tol) | (np.abs(x - Lx) < tol) | (np.abs(y) < tol) | (np.abs(y - Ly) < tol)
-    on_beta = np.array(on_beta)
+    on_beta = np.concatenate((comp_of >= 0, mid_on_beta, np.zeros(len(ci), dtype=bool)))
     bnd = np.nonzero(on_omega | on_beta)[0]
     bnd_beta = np.nonzero(on_beta)[0]
 
