@@ -22,7 +22,7 @@ def jacobian(X, G):
 
     Renvoie J_q (ne, 2, 2), J[e, d, a] = dx_d / dx^_a, et det J_q (ne,).
     """
-    J = np.einsum("ekd,ak->eda", X, G)
+    J = X.transpose(0, 2, 1) @ G.T
     return J, J[:, 0, 0] * J[:, 1, 1] - J[:, 0, 1] * J[:, 1, 0]
 
 
@@ -56,8 +56,8 @@ def quadrature_points(mesh, conn, ref):
         J, det = jacobian(X, G)
         if np.any(det <= 0):
             check_jacobians(mesh)  # message détaillé
-        B = np.einsum("ead,ak->edk", np.linalg.inv(J), G)
-        yield psi, np.einsum("ekd,k->ed", X, psi), ref.w[q] * det, B
+        B = np.linalg.inv(J).transpose(0, 2, 1) @ G
+        yield psi, psi @ X, ref.w[q] * det, B
 
 
 def assemble(mesh, f, k=1.0):
@@ -70,7 +70,8 @@ def assemble(mesh, f, k=1.0):
         Ae = np.zeros((ne, nloc, nloc))
         Fe = np.zeros((ne, nloc))
         for psi, xq, wd, B in quadrature_points(mesh, conn, ref):
-            Ae += wd[:, None, None] * (np.einsum("edk,edl->ekl", B, B) + k * np.outer(psi, psi))
+            # (B^T B)_kl = sum_d B_dk B_dl
+            Ae += wd[:, None, None] * (B.transpose(0, 2, 1) @ B + k * np.outer(psi, psi))
             Fe += (wd * f(xq[:, 0], xq[:, 1]))[:, None] * psi[None, :]
         rows.append(np.repeat(conn, nloc, axis=1).ravel())
         cols.append(np.tile(conn, (1, nloc)).ravel())
@@ -93,7 +94,7 @@ def element_errors(mesh, U, u_ex, grad_u_ex):
         area, l2, h1_semi, mean = (np.zeros(len(conn)) for _ in range(4))
         for psi, xq, wd, B in quadrature_points(mesh, conn, ref):
             uh = Ue @ psi
-            grad_uh = np.einsum("edk,ek->ed", B, Ue)
+            grad_uh = (B @ Ue[:, :, None])[:, :, 0]
             gx, gy = grad_u_ex(xq[:, 0], xq[:, 1])
             area += wd
             e = u_ex(xq[:, 0], xq[:, 1]) - uh

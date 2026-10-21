@@ -9,6 +9,7 @@
 \usepackage{tikz}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
+\usepackage[hidelinks]{hyperref}
 
 \geometry{margin=2.5cm}
 
@@ -159,15 +160,21 @@ $\|u - u_h\|_{H^1} = O(h^2)$ et $\|u - u_h\|_{L^2} = O(h^3)$.
 \paragraph{Remarque.} Avec des triangles courbes, le domaine maillé $D_h$
 n'est pas exactement $D$ : en toute rigueur $V_h \not\subset H^1_0(D)$, et
 $g_\beta$ n'est imposée exactement qu'aux nœuds de $\partial\beta$.
-L'erreur géométrique commise est d'un ordre supérieur et ne dégrade pas les
-taux ci-dessus.
+L'erreur géométrique commise est du même ordre que l'erreur d'interpolation
+(éléments isoparamétriques de degré 2) et ne dégrade pas les taux ci-dessus.
+Pour un obstacle polygonal (section~\ref{sec:polygone}), $D_h = D$ et
+seule subsiste l'interpolation de $g_\beta$ aux nœuds de $\partial\beta$.
 
 
 \section{Maillage en 2D}
 
-L'idée est de réaliser un maillage autour d'un obstacle $\beta$ à bord
-courbe, éventuellement non convexe, mais étoilé par rapport à un point $c$
-(chaque demi-droite issue de $c$ coupe $\partial\beta$ une seule fois). Le
+L'idée est de réaliser un maillage autour d'un obstacle $\beta$ dont le
+bord peut être courbe ou polygonal, et $\beta$ éventuellement non convexe.
+On exige seulement que chaque composante connexe de $\beta$ soit bordée par
+une courbe fermée simple ; $\beta$ peut être non connexe, réunion de
+plusieurs obstacles disjoints. En pratique, $\beta$ est lu dans un fichier
+CAO (section~\ref{sec:step}) ; des formes analytiques (disque, cacahuète,
+polygone) servent à la validation (section~\ref{sec:beta}). Le
 domaine $\Omega = [0, L_x] \times [0, L_y]$ est un rectangle, avec
 $L_x = n_x h$ et $L_y = n_y h$, que l'on recouvre d'une grille cartésienne de
 pas $h$. Le maillage couvre $\Omega \setminus \beta$, que l'on découpe en deux
@@ -179,8 +186,8 @@ zones :
         recouvrent $\Omega$ jusqu'à son bord ;
   \item le reste $\mathcal{T} = (\Omega \setminus \beta) \setminus \mathcal{Q}$,
         une zone autour de $\beta$, remplie par une triangulation non
-        structurée (éléments $P_2$), qui permet de suivre le bord courbe de
-        $\beta$ et de raffiner le maillage à son voisinage.
+        structurée (éléments $P_2$), qui permet de suivre le bord de
+        $\beta$, éventuellement courbe, et de raffiner le maillage à son voisinage.
 \end{itemize}
 
 Comme $\Omega$ est un rectangle aligné sur la grille, son bord est formé
@@ -191,39 +198,66 @@ nœuds de la grille.
 \subsection{Définition de l'obstacle $\beta$}
 \label{sec:beta}
 
-On décrit $\beta$ en coordonnées polaires autour d'un centre
-$c = (c_x, c_y)$. Pour $x \in \mathbb{R}^2$, on note
-$\rho(x) = |x - c|$ et $\theta(x)$ l'angle polaire de $x - c$
-(\texttt{numpy.arctan2}). On se donne un rayon $r(\theta) > 0$,
-$2\pi$-périodique et régulier, et on pose
+\paragraph{Cadre général.} L'obstacle $\beta$ est une réunion de composantes
+connexes $\beta_1, \dots, \beta_p$ disjointes, chacune bordée par une courbe
+fermée simple $\partial\beta_c$, décrite par un paramétrage $2\pi$-périodique
 \[
-\beta = \{ x : \rho(x) \le r(\theta(x)) \},
+\gamma_c : [0, 2\pi) \to \mathbb{R}^2 ,
 \qquad
-\partial\beta = \{ \gamma(t),\ t \in [0, 2\pi) \},
-\quad
-\gamma(t) = c + r(t) \begin{pmatrix} \cos t \\ \sin t \end{pmatrix}.
+\partial\beta_c = \{ \gamma_c(t),\ t \in [0, 2\pi) \}.
 \]
-Deux formes sont utilisées :
+Ce bord peut être régulier, ou formé de morceaux réguliers raccordés en des
+\emph{points de cassure} (les coins éventuels de $\beta$), qui seront
+toujours des nœuds du maillage. Le reste de la méthode n'utilise $\beta$
+qu'au travers de quatre opérations :
 \begin{itemize}
-  \item \textbf{Disque} (validation) : $r(\theta) = R$.
-  \item \textbf{Cacahuète} (non convexe) :
-        $r(\theta) = r_0\,(1 + \varepsilon \cos 2\theta)$, avec
-        $0 \le \varepsilon < 1$ pour que $r > 0$. Le bord est concave en
-        $\theta = \pm\pi/2$ dès que $\varepsilon > 1/5$.
+  \item \textbf{évaluation} de $\gamma_c(t)$, pour placer les nœuds de
+        $\partial\beta$ et les nœuds milieux des arêtes courbes ;
+  \item \textbf{discrétisation du bord} : les paramètres $t_i$ des nœuds de
+        $\partial\beta_c$, au pas $h_\beta$, points de cassure compris ;
+  \item \textbf{test d'appartenance} $x \in \beta$ ;
+  \item \textbf{distance} $d(x, \beta) = \min_c d(x, \beta_c)$, calculée à
+        partir d'un échantillonnage fin de chaque $\gamma_c$ et mise à zéro
+        si $x \in \beta$.
 \end{itemize}
-La condition $r > 0$ est vérifiée sur l'échantillonnage de $\gamma$ : elle
-garantit que $\beta$ est étoilé par rapport à $c$ et que $\gamma$ est une
-courbe simple.
-Les opérations géométriques dont le code a besoin sont alors :
+Toute description de $\beta$ qui fournit ces opérations convient : en
+particulier, $\beta$ n'a pas besoin d'être convexe ni étoilé.
+
+\paragraph{Obstacle défini par un fichier CAO.} C'est le cas visé en
+pratique : $\beta$ est dessiné dans un logiciel de CAO et exporté au format
+STEP. Le bord de chaque composante est alors une suite de courbes (segments,
+arcs, B-splines\dots), dont les extrémités sont les points de cassure, et
+$\gamma_c$ est paramétré par l'abscisse curviligne. La lecture du fichier et
+la construction de $\gamma_c$ sont détaillées à la
+section~\ref{sec:step}.
+
+\paragraph{Formes analytiques.} Pour valider la méthode et étudier la
+convergence, on utilise aussi des obstacles décrits par une formule, sans
+fichier :
 \begin{itemize}
-  \item \textbf{test d'appartenance} : $x \in \beta \iff \rho(x) \le r(\theta(x))$ ;
-  \item \textbf{distance} $d(x, \beta)$ : distance minimale de $x$ à un
-        échantillonnage fin de $\gamma$ (par exemple 2000 points), mise à
-        zéro si $x \in \beta$ ;
-  \item \textbf{fonction de niveau} $\phi_\beta(x) = \rho(x)^2 - r(\theta(x))^2$,
-        négative dans $\beta$, nulle sur $\partial\beta$ et positive dans
-        $D$. Elle est régulière dans $D$ car le centre $c$ est dans $\beta$.
+  \item \textbf{obstacles polaires}, décrits autour d'un centre
+        $c = (c_x, c_y)$ par un rayon $r(\theta) > 0$, $2\pi$-périodique et
+        régulier. Avec $\rho(x) = |x - c|$ et $\theta(x)$ l'angle polaire de
+        $x - c$ (\texttt{numpy.arctan2}),
+        \[
+        \beta = \{ x : \rho(x) \le r(\theta(x)) \},
+        \qquad
+        \gamma(t) = c + r(t) \begin{pmatrix} \cos t \\ \sin t \end{pmatrix},
+        \]
+        et le test d'appartenance est direct. La condition $r > 0$, vérifiée
+        sur l'échantillonnage de $\gamma$, garantit que $\gamma$ est une
+        courbe simple ; ce cas particulier impose en revanche que $\beta$ soit
+        étoilé par rapport à $c$. Deux formes sont utilisées : le
+        \textbf{disque} $r(\theta) = R$ (validation, section~\ref{sec:validation}),
+        et la \textbf{cacahuète} $r(\theta) = r_0\,(1 + \varepsilon \cos 2\theta)$,
+        $0 \le \varepsilon < 1$, dont le bord est concave en
+        $\theta = \pm\pi/2$ dès que $\varepsilon > 1/5$ ;
+  \item \textbf{polygones}, donnés par la liste de leurs sommets
+        (section~\ref{sec:polygone}), qui ne sont ni nécessairement convexes
+        ni étoilés.
 \end{itemize}
+Ces formes peuvent être combinées entre elles et avec des fichiers CAO pour
+obtenir un obstacle non connexe.
 
 \paragraph{Notations de taille.} Dans tout le document, $h$ désigne le pas
 de la grille, $h_\beta$ le pas sur $\partial\beta$ et $\delta$ la largeur de
@@ -499,14 +533,43 @@ sommets), on remplace la taille cible par
 \[
 h_{\mathrm{loc}}^{\mathrm{coin}}(x)
 = \max\!\left( h_{\min},\ \min\!\left( h_{\mathrm{loc}}(x),\
-h_\beta \left(\frac{r(x)}{\delta}\right)^{1-\mu} \right) \right),
+h_\beta \left(\frac{r(x)}{R_c}\right)^{1-\mu} \right) \right),
 \]
-où $h_{\mathrm{loc}}$ est la taille de la section~\ref{sec:construction}.
-Pour des éléments de degré $k = 2$, le paramètre de gradation doit vérifier
-$\mu < \lambda / k$, soit $\mu < 1/3$ pour un carré (on prend par exemple
-$\mu = 1/4$). La taille minimale $h_{\min}$, de l'ordre de $h^{1/\mu}$,
-évite une taille nulle au sommet. Le nombre de mailles reste de l'ordre de
-$h^{-2}$ et on retrouve $O(h^2)$ en norme $H^1$ et $O(h^3)$ en norme $L^2$.
+où $h_{\mathrm{loc}}$ est la taille de la section~\ref{sec:construction} et
+$R_c$ le rayon de la zone graduée, \emph{fixé quand $h \to 0$} (par exemple
+de l'ordre de la longueur des côtés de $\beta$). Le terme central vaut
+$h_\beta$ à la distance $R_c$ du sommet et décroît comme $r^{1-\mu}$ en s'en
+approchant ; le minimum avec $h_{\mathrm{loc}}$ ne fait que raffiner, et
+$h_{\min}$ évite une taille nulle au sommet.
+
+Comme $h_\beta \propto h$, la taille vaut $C\,h\,r^{1-\mu}$ près du coin.
+Les dérivées d'ordre $k+1$ de $u$ s'y comportent comme $r^{\lambda - k - 1}$,
+et en sommant l'erreur d'interpolation sur des anneaux d'épaisseur
+$\mathrm{d}r$,
+\[
+\|u - I_h u\|_{H^1}^2 \lesssim \int_0^{R_c} \big(h\,r^{1-\mu}\big)^{2k}\,
+r^{2\lambda - 2k - 2}\, r\,\mathrm{d}r
+= h^{2k} \int_0^{R_c} r^{2(\lambda - k\mu) - 1}\,\mathrm{d}r ,
+\]
+qui est fini si et seulement si $\mu < \lambda / k$. Pour des éléments de
+degré $k = 2$, cela donne $\mu < 1/3$ pour un carré (on prend par exemple
+$\mu = 1/4$). Les éléments qui touchent le sommet ont alors une taille de
+l'ordre de $h^{1/\mu}$, d'où le choix $h_{\min} \sim h^{1/\mu}$. Le nombre
+de mailles,
+\[
+\int_0^{R_c} \frac{r\,\mathrm{d}r}{\big(h\,r^{1-\mu}\big)^2}
+= h^{-2} \int_0^{R_c} r^{2\mu - 1}\,\mathrm{d}r = O(h^{-2}),
+\]
+reste de l'ordre de celui d'un maillage uniforme, et on retrouve $O(h^2)$ en norme $H^1$ et $O(h^3)$
+en norme $L^2$.
+
+Il est essentiel que $R_c$ ne dépende pas de $h$. Avec $R_c = \delta$,
+proportionnel à $h$ dans les études de convergence, la taille vaudrait
+$C\,h^{\mu} r^{1-\mu}$ dans une boule de rayon $O(h)$ seulement : les
+contributions à l'intégrale ci-dessus de $r < \delta$ et de $r > \delta$
+(où la taille vaut $h$) seraient toutes deux de l'ordre de $h^{2\lambda}$,
+et l'ordre resterait $O(h^\lambda)$, seule la constante étant améliorée.
+
 Il suffirait de transmettre $h_{\mathrm{loc}}^{\mathrm{coin}}$ à
 \texttt{gmsh} à la place de $h_{\mathrm{loc}}$, et de répartir les nœuds de
 $\partial\beta$ selon cette taille. Le code implémente une version plus
@@ -609,15 +672,14 @@ points d'échantillonnage de $\partial\beta$.
 \subsection{Obstacle importé d'un fichier CAO (STEP)}
 \label{sec:step}
 
-Plutôt que de décrire $\beta$ par une formule ou par la liste de ses
-sommets, on peut le dessiner dans un logiciel de CAO et l'exporter au format
-STEP (\texttt{.step}), le format d'échange standard des modeleurs
-géométriques. Un tel fichier décrit exactement le bord de $\beta$ comme une
+C'est la façon principale de définir $\beta$ (section~\ref{sec:beta}) : on
+le dessine dans un logiciel de CAO et on l'exporte au format STEP
+(\texttt{.step}), le format d'échange standard des modeleurs géométriques. Un tel fichier décrit exactement le bord de $\beta$ comme une
 suite de courbes : segments, arcs de cercle ou d'ellipse, B-splines\dots{} Le
 reste de la méthode (grille, zone $\mathcal{Q}$, triangulation de
-$\mathcal{T}$, numérotation) est inchangé : seule la description de $\beta$
-change, et elle combine le cas courbe (section~\ref{sec:beta}) et le cas
-polygonal (section~\ref{sec:polygone}).
+$\mathcal{T}$, numérotation) est celui décrit pour les formes analytiques :
+la description de $\beta$ combine le cas courbe (arêtes courbes) et le cas
+polygonal (coins imposés comme nœuds, section~\ref{sec:polygone}).
 
 \paragraph{Lecture du fichier.} Le fichier est lu par \texttt{gmsh}, avec le
 noyau géométrique OpenCASCADE. Il doit décrire une géométrie plane, contenue
@@ -1304,6 +1366,7 @@ Les valeurs $\widehat{\psi}_k(\hat{x}_q)$ et $\nabla\widehat{\psi}_k(\hat{x}_q)$
 ne dépendent pas de l'élément : on les calcule une seule fois.
 
 \subsection{Matrices élémentaires}
+\label{sec:elementaires}
 
 Pour un élément $K$ à $n_K$ nœuds ($n_K = 6$ pour un triangle,
 $n_K = 9$ pour un quadrilatère), de transformation $\Phi_K$, on note en
@@ -1474,8 +1537,7 @@ f = -\Delta u_{\mathrm{ex}} + k\, u_{\mathrm{ex}}
 \subsection{Calcul des erreurs}
 
 Les erreurs sont calculées élément par élément avec la même quadrature que
-pour l'assemblage. Avec les notations de la section sur les matrices
-élémentaires, et $U^K = (U_{\mathrm{conn}_K(k)})_{k}$ les valeurs de $u_h$
+pour l'assemblage. Avec les notations de la section~\ref{sec:elementaires}, et $U^K = (U_{\mathrm{conn}_K(k)})_{k}$ les valeurs de $u_h$
 aux nœuds de l'élément $K$ :
 \[
 \|u_{\mathrm{ex}} - u_h\|_{L^2}^2
@@ -1580,7 +1642,7 @@ cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
 \hline
 Module & Contenu \\
 \hline
-\texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, $\phi_\beta$, \\
+\texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, \\
                       & polygone, lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
 \texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
 \texttt{sizing.py}    & raffinement a priori : sources aux coins et interstices, taille $h_r$ \\
