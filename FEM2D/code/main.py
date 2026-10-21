@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument("--step", metavar="FICHIER", help="obstacle lu dans un fichier STEP / IGES / BREP")
     parser.add_argument("--obstacle", nargs="+", action="append", metavar="TYPE", dest="components",
                         help="composante de beta, à répéter : disque x y R | cacahuete x y r0 eps | "
+                             "couronne x y R r | "
                              "polygone x y [x1 y1 ...] | fichier chemin x y [echelle]")
     parser.add_argument("--echelle", type=float, default=1.0, help="facteur d'échelle du fichier CAO")
     parser.add_argument("--k", type=float, default=K, help=f"coefficient k >= 0 de -Δu + k u = f [{K:g}]")

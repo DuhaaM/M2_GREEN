@@ -7,6 +7,7 @@ from cases import DISK
 from config import LX, LY
 from geometry import disk
 from mesh import build_mesh
+from solver import solve
 from validation import validation_problem
 
 
@@ -42,3 +43,11 @@ def test_convergence_orders():
     orders = np.log(errs[:-1] / errs[1:]) / np.log(2)
     assert (orders[:, 0] > 2.7).all(), orders
     assert (orders[:, 1] > 1.8).all(), orders
+
+
+def test_negative_k_rejected():
+    """k < 0 : A_II peut être indéfinie, la factorisation sans pivotage est refusée."""
+    h = 0.5
+    mesh = build_mesh(disk(DISK["center"], DISK["R"]), LX, LY, h, 0.3 * h, 1.6 * h, 0.9 * h)
+    with pytest.raises(ValueError, match="positif ou nul"):
+        solve(mesh, lambda x, y: np.ones_like(x), k=-1.0)

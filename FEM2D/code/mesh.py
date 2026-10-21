@@ -11,6 +11,7 @@ import numpy as np
 from scipy import ndimage
 
 from assembly import check_jacobians
+from geometry import loops_of
 from sizing import graded_params, size_field
 
 
@@ -21,7 +22,9 @@ class Mesh:
     quad: np.ndarray
     bnd: np.ndarray
     bnd_beta: np.ndarray  # nœuds de dbeta (y compris les milieux P2 placés sur la courbe)
-    beta_points: list  # points de discrétisation de gamma, un tableau par composante de beta
+    beta_points: list  # points de discrétisation de dbeta, un tableau par courbe fermée
+    # (bord extérieur ou bord de trou ; un point est dans beta s'il est dans un nombre impair
+    # de ces courbes)
 
     @property
     def n_nodes(self):
@@ -39,8 +42,9 @@ def select_cells(obstacle, nx, ny, h, m_beta):
         keep &= (obstacle.distance(pts) >= m_beta).reshape(nx, ny)
 
     while True:
-        # Îlots de cellules isolés du bord de Omega (entourés par des composantes de beta) :
-        # retirés, pour que chaque trou de Q soit bordé par un seul contour
+        # Îlots de cellules isolés du bord de Omega (entourés par des composantes de beta, ou
+        # dans une cavité de beta) : retirés, pour que chaque trou de Q soit bordé par un seul
+        # contour ; une cavité est alors entièrement triangulée
         labels, _ = ndimage.label(keep)
         border = np.unique(np.concatenate((labels[0], labels[-1], labels[:, 0], labels[:, -1])))
         keep &= np.isin(labels, border[border > 0])
@@ -115,11 +119,13 @@ def inner_contours(keep):
 # ----------------------------------------------------------------------------
 # Étapes 3-4 : triangulation de la zone T avec gmsh (éléments d'ordre 1)
 # ----------------------------------------------------------------------------
-def triangulate(contour_xy, betas_xy, h, h_beta, delta, size=None):
+def triangulate(contour_xy, betas_xy, h, h_beta, delta, size=None, cavities_xy=()):
     """Renvoie (node_xy, triangles, contour_nodes, beta_nodes) en indices locaux gmsh.
 
-    betas_xy : liste des points de dbeta, un tableau par composante connexe de beta
-    (chacune devient un trou de la zone T). beta_nodes suit la même structure.
+    betas_xy : liste des points des bords extérieurs de beta, un tableau par composante connexe
+    (chacune devient un trou de la zone T) ; cavities_xy : points des bords des trous de beta,
+    chacun bordant une cavité de D maillée comme une surface à part. beta_nodes suit la
+    structure de betas_xy, puis de cavities_xy.
     size : taille du raffinement a priori (sizing.SizeField), ou None ; la taille de gmsh
     est alors le minimum de celle-ci et du champ habituel (h_beta sur dbeta, h à distance delta).
     """
@@ -137,10 +143,13 @@ def triangulate(contour_xy, betas_xy, h, h_beta, delta, size=None):
 
         contour_pts, contour_lines = closed_polygon(contour_xy)
         betas = [closed_polygon(xy) for xy in betas_xy]
-        beta_lines = [line for _, lines in betas for line in lines]
+        cavities = [closed_polygon(xy) for xy in cavities_xy]
+        beta_lines = [line for _, lines in betas + cavities for line in lines]
         loop_out = geo.addCurveLoop(contour_lines)
         loops_beta = [geo.addCurveLoop(lines) for _, lines in betas]
         geo.addPlaneSurface([loop_out] + loops_beta)
+        for _, lines in cavities:
+            geo.addPlaneSurface([geo.addCurveLoop(lines)])
         # Aucun nœud ajouté sur les contours : leurs nœuds sont imposés
         for line in contour_lines + beta_lines:
             geo.mesh.setTransfiniteCurve(line, 2)
@@ -179,7 +188,7 @@ def triangulate(contour_xy, betas_xy, h, h_beta, delta, size=None):
             return index[int(tags[0])]
 
         contour_nodes = [point_node(p) for p in contour_pts]
-        beta_nodes = [[point_node(p) for p in pts] for pts, _ in betas]
+        beta_nodes = [[point_node(p) for p in pts] for pts, _ in betas + cavities]
     finally:
         gmsh.finalize()
     return node_xy, triangles, contour_nodes, beta_nodes
@@ -201,29 +210,33 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
 
     keep = select_cells(obstacle, nx, ny, h, m_beta)
     loops, holes = inner_contours(keep)
-    # Composantes connexes de beta (une seule pour Obstacle, Polygon, CurveObstacle)
+    # Courbes fermées de dbeta : bords extérieurs des composantes connexes de beta (une seule
+    # pour Obstacle, Polygon, CurveObstacle), puis bords de leurs trous (HoledObstacle)
     comps = getattr(obstacle, "components", [obstacle])
-    size = size_field(comps, obstacle.inside, h_beta, refine)
+    curves = [loop for c in comps for loop in loops_of(c)]
+    is_cavity = [k > 0 for c in comps for k in range(len(loops_of(c)))]
+    size = size_field(curves, obstacle.inside, h_beta, refine, is_cavity)
     if size is None:
-        t_beta = [c.boundary_params(h_beta) for c in comps]
+        t_beta = [c.boundary_params(h_beta) for c in curves]
     else:
-        t_beta = [graded_params(c, lambda p: np.minimum(h_beta, size(p))) for c in comps]
-    beta_xy = [c.gamma(t) for c, t in zip(comps, t_beta)]
-    # Trou de Q contenant chaque composante (repéré par la cellule d'un point de son bord)
+        t_beta = [graded_params(c, lambda p: np.minimum(h_beta, size(p))) for c in curves]
+    beta_xy = [c.gamma(t) for c, t in zip(curves, t_beta)]
+    # Trou de Q contenant chaque courbe (repéré par la cellule d'un point de la courbe) ; une
+    # cavité, sans cellule de Q, est dans le même trou que le bord extérieur qui l'entoure
     members = [[] for _ in loops]
     for c, xy in enumerate(beta_xy):
         i, j = np.clip((xy // h).astype(int), 0, [nx - 1, ny - 1]).T
         hole = np.unique(holes[i, j])
         if hole[0] == 0:
-            raise ValueError(f"La composante {c + 1} de beta traverse une cellule de Q.")
+            raise ValueError(f"La courbe {c + 1} de dbeta traverse une cellule de Q.")
         if len(hole) > 1:
-            raise ValueError(f"La composante {c + 1} de beta est à cheval sur plusieurs trous de Q.")
+            raise ValueError(f"La courbe {c + 1} de dbeta est à cheval sur plusieurs trous de Q.")
         members[hole[0] - 1].append(c)
 
     # Les nœuds sont créés par blocs (sommets de Q, nœuds de T, milieux, centres) :
     # coords est la concaténation des blocs, n le nombre de nœuds déjà créés
     coords = []
-    beta_glob = [None] * len(comps)  # numéros globaux des points gamma_c(t_k), par composante
+    beta_glob = [None] * len(curves)  # numéros globaux des points gamma_c(t_k), par courbe
 
     # 1. Sommets de la grille utilisés par Q
     used = np.zeros((nx + 1, ny + 1), dtype=bool)
@@ -241,8 +254,10 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
     tri_parts = []
     for loop, cs in zip(loops, members):
         contour_xy = [(i * h, j * h) for i, j in loop]
+        cs = [c for c in cs if not is_cavity[c]] + [c for c in cs if is_cavity[c]]
         node_xy, tri3, contour_nodes, beta_nodes = triangulate(
-            contour_xy, [beta_xy[c] for c in cs], h, h_beta, delta, size)
+            contour_xy, [beta_xy[c] for c in cs if not is_cavity[c]], h, h_beta, delta, size,
+            [beta_xy[c] for c in cs if is_cavity[c]])
         g2glob = -np.ones(len(node_xy), dtype=int)
         li, lj = np.array(loop).T
         g2glob[contour_nodes] = vid[li, lj]
@@ -287,7 +302,7 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
         sel, lo = sel[on_curve], np.where(forward, ka, kb)[on_curve]
         hi = (lo + 1) % len(t)
         t_mid = 0.5 * (t[lo] + t[hi] + 2 * np.pi * (hi == 0))
-        mid_xy[sel] = comps[c].gamma(t_mid)
+        mid_xy[sel] = curves[c].gamma(t_mid)
         mid_on_beta[sel] = True
     mid_id = n + inv.ravel()
     n_tri = len(tri3)

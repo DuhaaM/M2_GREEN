@@ -3,7 +3,8 @@
 Taille visée en un point de dbeta, bornée par h_beta (r > 0 : intensité du raffinement,
 paramètre raffinement ; r = 0 : pas de raffinement, maillage inchangé) :
     interstice : d / (N_GAP r), d distance à la partie de dbeta qui fait face à travers D
-                 (autre composante, ou même composante après un détour, ex. fond d'une fente) ;
+                 (autre composante, ou même composante après un détour, ex. fond d'une fente ;
+                 pas les deux côtés d'un même coin saillant de D, angle < pi, où u est régulière) ;
     courbure   : THETA / (r |kappa|), angle sous-tendu par un élément de dbeta <= THETA / r
                  (désactivé par défaut, CURVATURE = False : sur les cas testés, en norme
                  d'énergie, moins rentable que de réduire h) ;
@@ -93,22 +94,27 @@ class SizeField:
         return (self.sizes[j] + GRADING * d).min(axis=1)
 
 
-def size_field(comps, inside, h_beta, r):
-    """Sources de raffinement de dbeta (composantes comps, indicatrice inside de beta).
+def size_field(comps, inside, h_beta, r, is_cavity=None):
+    """Sources de raffinement de dbeta (courbes fermées comps, indicatrice inside de beta).
+
+    is_cavity[c] : la courbe c borde un trou de beta (beta est alors à l'extérieur de la courbe).
 
     Renvoie un SizeField, ou None si r = 0 ou si aucune taille n'est inférieure à h_beta.
     """
     if r <= 0:
         return None
     ds = h_beta / 10
-    points, sizes, comp_of, arc, loop_length = [], [], [], [], []
+    points, sizes, comp_of, arc, loop_length, n_convex, convex_total = [], [], [], [], [], [], []
     for c, comp in enumerate(comps):
         P, starts = _loop_samples(comp, ds)
         n = len(P)
         step = np.linalg.norm(np.roll(P, -1, axis=0) - P, axis=1)
         s = np.concatenate(([0.0], np.cumsum(step[:-1])))
         x, y = P.T
-        orientation = np.sign(x @ np.roll(y, -1) - y @ np.roll(x, -1))  # +1 : sens direct
+        # +1 : beta à gauche du sens de parcours (bord extérieur parcouru dans le sens direct)
+        orientation = np.sign(x @ np.roll(y, -1) - y @ np.roll(x, -1))
+        if is_cavity is not None and is_cavity[c]:
+            orientation = -orientation
         size = np.full(n, np.inf)
 
         # Courbure, hors du voisinage des points de cassure (traités comme coins éventuels)
@@ -127,6 +133,12 @@ def size_field(comps, inside, h_beta, r):
         turn = orientation * _turn(P[starts] - P[starts - 1], P[(starts + 1) % n] - P[starts])
         size[starts[turn > CORNER_ANGLE]] = np.minimum(size[starts[turn > CORNER_ANGLE]],
                                                       h_beta / (CORNER * r))
+        # Coins saillants de D (virage vers D, angle de D < pi) : n_convex[k] = nombre de ces
+        # coins d'indice <= k le long de la courbe
+        convex = np.zeros(n, dtype=int)
+        convex[starts[turn < -CORNER_ANGLE]] = 1
+        n_convex.append(np.cumsum(convex))
+        convex_total.append(np.full(n, convex.sum()))
 
         points.append(P)
         sizes.append(size)
@@ -134,16 +146,24 @@ def size_field(comps, inside, h_beta, r):
         arc.append(s)
         loop_length.append(np.full(n, s[-1] + step[-1]))
     P, size = np.vstack(points), np.concatenate(sizes)
-    comp_of, arc, loop_length = map(np.concatenate, (comp_of, arc, loop_length))
+    comp_of, arc, loop_length, n_convex, convex_total = map(
+        np.concatenate, (comp_of, arc, loop_length, n_convex, convex_total))
 
     # Interstices : paires de points proches qui se font face à travers D
     pairs = cKDTree(P).query_pairs(N_GAP * r * h_beta, output_type="ndarray")
     if len(pairs):
-        i, j = pairs.T
+        i, j = np.sort(pairs, axis=1).T  # i < j : sur une même courbe, arc[i] <= arc[j]
         dist = np.linalg.norm(P[i] - P[j], axis=1)
-        along = np.abs(arc[i] - arc[j])
-        along = np.minimum(along, loop_length[i] - along)
-        facing = (comp_of[i] != comp_of[j]) | (along > FACING * dist)
+        direct = arc[j] - arc[i]
+        along = np.minimum(direct, loop_length[i] - direct)
+        same = comp_of[i] == comp_of[j]
+        facing = ~same | (along > FACING * dist)
+        # Deux côtés d'un même coin saillant de D (seul coin sur le plus court chemin de i à j
+        # le long de dbeta) : coin aigu, et non interstice ; près du sommet, la distance tend
+        # vers 0 et le critère raffinerait sans fin là où u est régulière
+        inner = n_convex[j] - n_convex[i]  # coins d'indice dans ]i, j]
+        corners = np.where(direct <= loop_length[i] - direct, inner, convex_total[i] - inner)
+        facing &= ~(same & (corners == 1))
         i, j, dist = i[facing], j[facing], dist[facing]
         across_d = ~inside(0.5 * (P[i] + P[j]))  # le segment pq traverse D, pas beta
         i, j, dist = i[across_d], j[across_d], dist[across_d]

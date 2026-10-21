@@ -171,8 +171,10 @@ seule subsiste l'interpolation de $g_\beta$ aux nœuds de $\partial\beta$.
 L'idée est de réaliser un maillage autour d'un obstacle $\beta$ dont le
 bord peut être courbe ou polygonal, et $\beta$ éventuellement non convexe.
 On exige seulement que chaque composante connexe de $\beta$ soit bordée par
-une courbe fermée simple ; $\beta$ peut être non connexe, réunion de
-plusieurs obstacles disjoints. En pratique, $\beta$ est lu dans un fichier
+des courbes fermées simples : une courbe extérieure et, si la composante est
+trouée, une courbe par trou. $\beta$ peut être non connexe, réunion de
+plusieurs obstacles disjoints, ou réunion d'obstacles qui se chevauchent,
+dont on calcule alors le bord (section~\ref{sec:union}). En pratique, $\beta$ est lu dans un fichier
 CAO (section~\ref{sec:step}) ; des formes analytiques (disque, cacahuète,
 polygone) servent à la validation (section~\ref{sec:beta}). Le
 domaine $\Omega = [0, L_x] \times [0, L_y]$ est un rectangle, avec
@@ -199,14 +201,17 @@ nœuds de la grille.
 \label{sec:beta}
 
 \paragraph{Cadre général.} L'obstacle $\beta$ est une réunion de composantes
-connexes $\beta_1, \dots, \beta_p$ disjointes, chacune bordée par une courbe
+connexes $\beta_1, \dots, \beta_p$ disjointes. Dans le cas le plus simple,
+chacune est bordée par une courbe
 fermée simple $\partial\beta_c$, décrite par un paramétrage $2\pi$-périodique
 \[
 \gamma_c : [0, 2\pi) \to \mathbb{R}^2 ,
 \qquad
 \partial\beta_c = \{ \gamma_c(t),\ t \in [0, 2\pi) \}.
 \]
-Ce bord peut être régulier, ou formé de morceaux réguliers raccordés en des
+Une composante trouée a plusieurs courbes de bord, chacune paramétrée de la
+même façon (section~\ref{sec:troue}) ; tout ce qui suit s'applique alors
+courbe par courbe. Ce bord peut être régulier, ou formé de morceaux réguliers raccordés en des
 \emph{points de cassure} (les coins éventuels de $\beta$), qui seront
 toujours des nœuds du maillage. Le reste de la méthode n'utilise $\beta$
 qu'au travers de quatre opérations :
@@ -257,7 +262,10 @@ fichier :
         ni étoilés.
 \end{itemize}
 Ces formes peuvent être combinées entre elles et avec des fichiers CAO pour
-obtenir un obstacle non connexe.
+obtenir un obstacle non connexe, ou réunies quand elles se chevauchent
+(section~\ref{sec:union}). La \textbf{couronne}
+$\{x : r \le |x - c| \le R\}$, $0 < r < R$, est l'exemple type d'obstacle
+troué (section~\ref{sec:troue}).
 
 \paragraph{Notations de taille.} Dans tout le document, $h$ désigne le pas
 de la grille, $h_\beta$ le pas sur $\partial\beta$ et $\delta$ la largeur de
@@ -283,7 +291,7 @@ Le maillage se construit ainsi :
           \item les îlots de cellules qui ne sont pas reliés (par des arêtes)
                 à la rangée de cellules le long de $\partial\Omega$, par
                 exemple des cellules enfermées entre plusieurs composantes de
-                $\beta$ : ils sont rendus à la zone $\mathcal{T}$, pour que
+                $\beta$ ou dans une cavité d'un obstacle troué : ils sont rendus à la zone $\mathcal{T}$, pour que
                 chaque trou de $\mathcal{Q}$ soit bordé par un seul contour
                 (composantes connexes calculées avec
                 \texttt{scipy.ndimage.label}) ;
@@ -327,6 +335,9 @@ Le maillage se construit ainsi :
         où la solution varie le plus, et de taille $h$ au raccord avec la
         grille. Les trous sont triangulés séparément, par des appels
         successifs à \texttt{gmsh}, et les triangles obtenus sont réunis.
+        Les cavités d'un obstacle troué, qui ne touchent pas $\mathcal{Q}$,
+        sont triangulées dans le même appel que le trou qui les entoure
+        (section~\ref{sec:troue}).
         Avec le raffinement de la section~\ref{sec:raffinement}, la taille
         transmise à \texttt{gmsh} est $\min(h_{\mathrm{loc}}, h_r)$.
   \item \textbf{Éléments isoparamétriques.} Pour chaque arête posée sur
@@ -819,10 +830,13 @@ plusieurs trous, chacun triangulé séparément (étapes 2 et 4 de la
 section~\ref{sec:construction}). Les deux situations peuvent coexister. Si
 des cellules de $\mathcal{Q}$ sont enfermées entre plusieurs composantes,
 sans lien avec le bord de $\Omega$, elles sont retirées (étape 1) et le trou
-englobe tout le groupe. Sont refusés un $\beta$ troué (une composante
-contient une autre) et deux faces qui se chevauchent ; le test porte sur les
-contours (croisement de deux contours ou contour contenu dans un autre), et
-seulement pour les composantes dont les boîtes englobantes se rencontrent.
+englobe tout le groupe. Les composantes d'un \texttt{MultiObstacle} doivent
+être disjointes : le test porte sur les contours (croisement de deux
+contours ou contour contenu dans un autre), et seulement pour les
+composantes dont les boîtes englobantes se rencontrent. Des obstacles qui se
+chevauchent sont d'abord réunis en une seule composante, et un contour
+contenu dans un autre peut être le bord d'un trou
+(section~\ref{sec:union}).
 
 Des composantes \emph{très} proches sont acceptées, mais les triangles du
 couloir qui les sépare sont alors très aplatis. Si l'un d'eux a une arête
@@ -881,13 +895,160 @@ la même zone $\mathcal{T}$.
 \end{center}
 
 En Python, \texttt{from\_step(path, scale)} de \texttt{geometry.py} renvoie
-un objet \texttt{CurveObstacle} (une composante) ou \texttt{MultiObstacle}
-(plusieurs composantes), qui se passe directement à
-\texttt{domain\_from\_obstacle} puis à \texttt{build\_mesh}. Pour produire un
+un objet \texttt{CurveObstacle} (une composante), \texttt{HoledObstacle}
+(une composante trouée) ou \texttt{MultiObstacle} (plusieurs composantes),
+qui se passe directement à
+\texttt{domain\_from\_obstacle} puis à \texttt{build\_mesh}. Les contours
+fermés lus dans le fichier sont classés par imbrication : un contour contenu
+dans un nombre impair d'autres contours borde un trou (face percée) et est
+rattaché au contour qui le contient directement ; les autres sont des bords
+extérieurs. Les composantes obtenues sont ensuite réunies comme à la
+section~\ref{sec:union}, ce qui fusionne deux faces qui se chevauchent. Pour produire un
 fichier STEP depuis Python, on construit la géométrie avec
 \texttt{gmsh.model.occ} (\texttt{addDisk}, \texttt{addRectangle},
 \texttt{addBSpline}, opérations booléennes\dots) puis on l'écrit avec
 \texttt{gmsh.write("obstacle.step")}.
+
+\subsection{Obstacles qui se chevauchent et obstacles troués}
+\label{sec:union}
+
+\subsubsection*{Réunion d'obstacles qui se chevauchent}
+
+Quand on compose $\beta$ à partir de formes simples (section~\ref{sec:usage})
+ou qu'un fichier CAO contient des faces qui se recouvrent, les obstacles
+$\beta_1, \dots, \beta_p$ peuvent se chevaucher. On remplace alors chaque
+groupe d'obstacles reliés par des chevauchements par leur réunion, qui est
+une seule composante de $\beta$ (fonction \texttt{union} de
+\texttt{geometry.py}). Les groupes sont les composantes connexes du graphe
+dont les arêtes sont les paires d'obstacles qui se touchent (même test que
+pour \texttt{MultiObstacle}) ; un obstacle isolé est gardé tel quel.
+
+\paragraph{Bord de la réunion.} Pour des fermés $\beta_1, \dots, \beta_q$,
+\[
+\partial\Big(\bigcup_c \beta_c\Big) \subset \bigcup_c \partial\beta_c ,
+\]
+et un point de $\partial\beta_c$ est sur le bord de la réunion s'il n'est à
+l'intérieur d'aucun autre $\beta_{c'}$. On échantillonne donc chaque courbe
+de bord (environ $4000$ points, en gardant les points de cassure), on élimine
+les échantillons situés dans un autre obstacle, et on garde les arcs restants.
+Leurs extrémités, les \emph{points d'intersection}, sont localisées par
+dichotomie sur le paramètre $t$, entre un échantillon gardé et un échantillon
+éliminé ($60$ itérations, soit la précision machine) : comme le test
+d'appartenance et $\gamma$ sont exacts, les deux arcs qui se rejoignent en un
+même point d'intersection le trouvent à $10^{-15}$ près.
+
+\paragraph{Orientation et mise bout à bout.} Chaque courbe est parcourue avec
+$\beta$ à sa gauche : sens trigonométrique pour un bord extérieur, sens
+inverse pour le bord d'un trou. Les arcs gardés s'enchaînent alors dans ce
+sens, et on les met bout à bout comme les courbes d'un fichier CAO
+(section~\ref{sec:step}). On obtient des contours fermés, que leur
+orientation suffit à classer : le contour direct est le bord extérieur de
+la réunion, les contours indirects bordent ses trous. La réunion est un
+\texttt{CurveObstacle} (aucun trou) ou un \texttt{HoledObstacle}. Les points
+d'intersection et les coins des obstacles de départ sont des extrémités de
+courbes, donc des points de cassure et des nœuds du maillage ; un point de
+cassure où le bord est régulier (comme $t = 0$ sur un disque) n'est pas
+conservé.
+
+\paragraph{Cas particuliers.}
+\begin{itemize}
+  \item Un obstacle contenu dans un autre disparaît ; si un seul obstacle
+        contient tous les autres, il est renvoyé tel quel, avec son
+        paramétrage exact.
+  \item Deux obstacles tangents (contact en un point, sans chevauchement)
+        donneraient un bord dégénéré : ils sont refusés.
+  \item Un obstacle situé dans la cavité d'un autre, sans le toucher, donne
+        deux contours directs : il est refusé (la cavité contiendrait
+        elle-même un obstacle, cas non traité).
+\end{itemize}
+
+Au point d'intersection de deux bords, $\beta$ a un coin rentrant :
+l'angle de $D$ y est inférieur à $\pi$ et $u$ y est régulière. Ces points
+ne sont donc pas raffinés (section~\ref{sec:raffinement}).
+
+\subsubsection*{Obstacle troué}
+\label{sec:troue}
+
+Une composante trouée $\beta_c$ est décrite par un bord extérieur
+$\Gamma_0$ et des bords de trous $\Gamma_1, \dots, \Gamma_m$, chacun
+paramétré comme une courbe fermée simple (disque, polygone, courbe CAO\dots) ;
+les trous $H_1, \dots, H_m$ sont deux à deux disjoints et strictement
+intérieurs à $\Gamma_0$ (classe \texttt{HoledObstacle}, vérifié à la
+construction). Chaque trou est une \emph{cavité} de $D$ : un morceau de $D$
+séparé du reste, bordé seulement par $\Gamma_k \subset \partial\beta$. Le
+problème y reste bien posé (condition de Dirichlet $u = g_\beta$ sur tout
+son bord), et il est indépendant de celui posé dans le reste de $D$.
+
+\paragraph{Opérations géométriques.}
+\[
+x \in \beta_c \iff x \text{ est à l'intérieur de } \Gamma_0
+\text{ et dans aucun } H_k ,
+\qquad
+d(x, \beta_c) =
+\begin{cases}
+d(x, \Gamma_k) & \text{si } x \in H_k , \\
+d(x, \text{intérieur de } \Gamma_0) & \text{sinon.}
+\end{cases}
+\]
+Dans une cavité, la distance est donc celle au bord du trou, et non zéro.
+
+\paragraph{Maillage.} Le maillage traite les courbes de bord
+$\Gamma_0, \dots, \Gamma_m$ une à une, comme les composantes d'un obstacle
+non connexe : chaque courbe a sa discrétisation, et une arête est posée sur
+$\partial\beta$ si ses deux sommets sont consécutifs sur une même courbe.
+Seule la triangulation change :
+\begin{itemize}
+  \item les cellules de la grille situées dans une cavité ne sont pas
+        reliées à $\partial\Omega$ : elles sont retirées à l'étape 1 de la
+        section~\ref{sec:construction}, et la cavité appartient au même trou
+        de $\mathcal{Q}$ que $\Gamma_0$ ;
+  \item dans l'appel à \texttt{gmsh} pour ce trou, la surface habituelle est
+        limitée par le contour du trou de $\mathcal{Q}$ et a $\Gamma_0$ pour
+        trou ; chaque cavité est une surface plane de plus, limitée par
+        $\Gamma_k$ seul, entièrement triangulée (la taille de maille y est
+        $h_{\mathrm{loc}}$, de $h_\beta$ sur $\Gamma_k$ à $h$ au-delà de
+        $\delta$).
+\end{itemize}
+Une grande cavité est ainsi entièrement maillée en triangles ; y garder un
+îlot de grille demanderait une zone $\mathcal{T}$ supplémentaire, bordée
+extérieurement par $\Gamma_k$, ce qui n'est pas fait.
+
+\paragraph{Affichage et position d'un point.} Un point est dans $\beta$ s'il
+est à l'intérieur d'un nombre impair de courbes de $\partial\beta$ (règle
+pair--impair) : c'est ce test qui vérifie le centre d'une source gaussienne,
+qui peut donc être placé dans une cavité. Pour la figure, chaque courbe est
+orientée selon la parité du nombre de courbes qui l'entourent, et le tout est
+rempli comme un seul chemin, ce qui laisse les cavités vides.
+
+\paragraph{Validation.} Pour la couronne $1 \le |x| \le 2$ (cavité : disque
+de rayon $1$), avec $f = 1$, $k = 1$ et $u = 0$ sur $\partial\beta$, la
+solution dans la cavité est radiale :
+\[
+-u'' - \frac{u'}{\rho} + u = 1, \quad u(1) = 0
+\qquad\Longrightarrow\qquad
+u(\rho) = 1 - \frac{I_0(\rho)}{I_0(1)} ,
+\]
+où $I_0$ est la fonction de Bessel modifiée. Avec $h = 0.5$ et
+$h_\beta = 0.1$, l'aire de $D$ est exacte à $10^{-6}$ près et l'écart
+maximal entre $u_h$ et $u$ aux nœuds de la cavité est $2.2 \cdot 10^{-5}$
+(il ne descend plus quand on réduit $h_\beta$ seul, l'intérieur de la cavité
+étant maillé au pas $h$). Pour un carré percé d'un carré, l'aire de $D$ est
+exacte à la précision machine.
+
+\paragraph{Exemples.} Le cas \texttt{couronne} ($c = (3.5, 2.5)$, $R = 1.5$,
+$r = 0.8$) donne $\Omega = [0, 9] \times [0, 9]$, 236 quadrilatères et 557
+triangles, dont ceux de la cavité. Le cas \texttt{fusion} réunit deux
+couronnes de rayons $2$ et $1.4$ dont les centres sont à $1.5$ l'un de
+l'autre : leurs cavités se coupent, et la réunion a trois cavités (deux
+croissants et une lentille), $\Omega = [0, 11.5] \times [0, 10]$, 292
+quadrilatères et 1142 triangles. Un fichier STEP contenant une face percée
+donne de même un \texttt{HoledObstacle}.
+
+\begin{center}
+\includegraphics[width=0.48\textwidth]{code/resultats/couronne/solution.png}
+\hfill
+\includegraphics[width=0.48\textwidth]{code/resultats/fusion/maillage.png}
+\end{center}
 
 \subsection{Raffinement a priori près de $\beta$}
 \label{sec:raffinement}
@@ -911,28 +1072,42 @@ $\mathcal{T}$. Son intensité est réglée par le paramètre $r \ge 0$
 par $r$, et $r = 0$ redonne exactement le maillage de la
 section~\ref{sec:construction}.
 
-\paragraph{Échantillonnage de $\partial\beta$.} Chaque composante de
-$\beta$ est échantillonnée au pas $h_\beta / 10$, morceau par morceau entre
+\paragraph{Échantillonnage de $\partial\beta$.} Chaque courbe de
+$\partial\beta$ (bord extérieur d'une composante, ou bord d'un trou) est
+échantillonnée au pas $h_\beta / 10$, morceau par morceau entre
 ses \emph{points de cassure} : les sommets d'un polygone, les extrémités des
 courbes d'un fichier CAO, et le seul point $t = 0$ pour un obstacle décrit
 en polaire. On note $p_i$ les échantillons, $s_i$ leur abscisse curviligne
-et $L_c$ la longueur de la composante $c$.
+et $L_c$ la longueur de la courbe $c$.
 
 \paragraph{Interstices.} Deux échantillons $p$ et $q$ se \emph{font face à
 travers $D$} si :
 \begin{enumerate}
-  \item ils appartiennent à deux composantes différentes, ou à la même
-        composante avec une distance le long de $\partial\beta$
+  \item ils appartiennent à deux courbes différentes, ou à la même
+        courbe avec une distance le long de $\partial\beta$
         \[
         \sigma(p, q) = \min\big(|s_p - s_q|,\ L_c - |s_p - s_q|\big) > 2\,|p - q| ;
         \]
-  \item le milieu $(p + q)/2$ est dans $D$.
+  \item le milieu $(p + q)/2$ est dans $D$ ;
+  \item s'ils sont sur la même courbe, le plus court chemin de $p$ à $q$ le
+        long de $\partial\beta$ ne passe pas par exactement un coin saillant
+        de $D$ (angle de $D$ inférieur à $\pi$, $\varphi < -15^\circ$ avec
+        les notations ci-dessous).
 \end{enumerate}
 La condition 1 écarte les voisins le long d'une même courbe : sur un cercle,
 $\sigma(p, q) \le \frac{\pi}{2}\,|p - q|$, donc deux points ne se font
 jamais face. Elle retient en revanche les deux bords d'une encoche étroite.
 La condition 2 écarte une plaque mince, dont les deux faces sont proches à
-travers $\beta$ et non à travers $D$. Si $d(p)$ est la distance de $p$ au
+travers $\beta$ et non à travers $D$. La condition 3 écarte les deux côtés
+d'un coin aigu de $D$, d'angle $\omega$ : pour deux points à distance $a$ du
+sommet, $\sigma = 2a$ et $|p - q| = 2a \sin(\omega/2)$, donc la
+condition 1 est remplie dès que $\omega < 60^\circ$. Comme $|p - q| \to 0$ au
+sommet, la taille visée y tendrait vers $0$, limitée seulement par le pas
+d'échantillonnage, alors que $u$ est régulière dans un coin d'angle
+inférieur à $\pi$. De tels coins apparaissent naturellement à l'intersection
+de deux obstacles réunis (section~\ref{sec:union}). Une vraie fente reste
+un interstice : à fond plat, le chemin d'un bord à l'autre passe par deux
+coins ; à fond arrondi, par aucun. Si $d(p)$ est la distance de $p$ au
 plus proche point qui lui fait face, la taille visée en $p$ est
 \[
 s(p) = \frac{d(p)}{3 r},
@@ -942,10 +1117,11 @@ paires à distance inférieure à $3 r h_\beta$ peuvent donner $s < h_\beta$ :
 ce sont les seules cherchées (arbre \texttt{scipy.spatial.cKDTree}).
 
 \paragraph{Coins singuliers.} En chaque point de cassure $P$, on calcule
-l'angle signé $\varphi$ dont tourne la tangente, compté positivement vers la
-gauche quand $\partial\beta$ est parcouru dans le sens trigonométrique (le
-sens de parcours est donné par le signe de l'aire du polygone des
-échantillons). Si $\varphi > 15^\circ$, $P$ est un coin saillant de $\beta$
+l'angle signé $\varphi$ dont tourne la tangente, compté positivement vers
+$\beta$ : la courbe est parcourue avec $\beta$ à sa gauche, c'est-à-dire dans
+le sens trigonométrique pour un bord extérieur et dans le sens inverse pour
+le bord d'un trou (le sens de parcours est donné par le signe de l'aire du
+polygone des échantillons). Si $\varphi > 15^\circ$, $P$ est un coin saillant de $\beta$
 et l'angle de $D$ en $P$ vaut $\omega = \pi + \varphi > \pi$ : $u$ y est
 singulière, et la taille visée est
 \[
@@ -1012,7 +1188,13 @@ $2G$ fois la distance de $x$ à la source la plus proche.
         section~\ref{sec:step}) ; avec, il est accepté sans changer
         $h_\beta$ ;
   \item \textbf{disque, cacahuète, \texttt{obstacle.step}, obstacle non
-        connexe} : ni coin singulier ni interstice, maillage inchangé.
+        connexe, couronne} : ni coin singulier ni interstice, maillage inchangé ;
+  \item \textbf{deux couronnes sécantes} (cas \texttt{fusion},
+        section~\ref{sec:union}) : leurs points d'intersection sont des coins
+        aigus de $D$, écartés par la condition 3 ; le maillage est celui
+        obtenu sans raffinement (3789 nœuds). Sans la condition 3, le critère
+        d'interstice y descendrait à des arêtes de $0.004$ et donnerait 4907
+        nœuds.
 \end{itemize}
 
 \begin{center}
@@ -1587,8 +1769,11 @@ $u_h$ est positive, nulle sur $\partial D$ et régulière. On fait de même pour
 le disque, l'obstacle polygonal (section~\ref{sec:polygone}), les obstacles
 lus dans les fichiers STEP de \texttt{code/cao/} (section~\ref{sec:step}), y
 compris l'obstacle non connexe et les deux disques presque tangents
-(section~\ref{sec:raffinement}), et les trois obstacles éloignés de la
-section~\ref{sec:step} (avec $g_\beta = 1 + x / L_x$ sur $\partial\beta$).
+(section~\ref{sec:raffinement}), les trois obstacles éloignés de la
+section~\ref{sec:step} (avec $g_\beta = 1 + x / L_x$ sur $\partial\beta$),
+la couronne et les deux couronnes sécantes (section~\ref{sec:union}), pour
+lesquelles $u_h$ doit aussi être positive dans chaque cavité et nulle sur son
+bord.
 
 Pour illustrer la condition non homogène, on reprend la cacahuète avec
 $f = 1$ et $g_\beta(x,y) = 1 + x / L_x$ sur $\partial\beta$ : $u_h$ doit
@@ -1643,7 +1828,8 @@ cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
 Module & Contenu \\
 \hline
 \texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, \\
-                      & polygone, lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
+                      & polygone, obstacle troué, réunion (\texttt{union}), \\
+                      & lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
 \texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
 \texttt{sizing.py}    & raffinement a priori : sources aux coins et interstices, taille $h_r$ \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
@@ -1687,13 +1873,29 @@ exécute en quelques secondes :
   \item \textbf{convergence} : ordres supérieurs à $2.7$ en $L^2$ et à $1.8$
         en $H^1$ sur $h = 0.5$, $0.25$, $0.125$ ;
   \item \textbf{garde-fous} : $m_\beta \le h/2$, $r(\theta) \le 0$, composantes
-        imbriquées ou qui se chevauchent, éléments retournés ;
+        d'un \texttt{MultiObstacle} imbriquées ou qui se chevauchent, trou qui
+        sort du bord extérieur, trous qui se chevauchent, couronne avec
+        $r \ge R$, éléments retournés ;
+  \item \textbf{réunion} : aire et points d'intersection de deux disques
+        sécants, croix de deux rectangles (aire exacte, 12 coins, maillage
+        d'aire exacte), obstacle contenu dans un autre renvoyé tel quel,
+        composantes disjointes conservées, contact tangent refusé ;
+  \item \textbf{obstacles troués} : anneau de disques sécants (cavité centrale
+        dans $D$, distance au bord du trou), couronne coupée par un disque,
+        couronnes dont les cavités se coupent (trois cavités), trou polygonal
+        découpé à ses seuls sommets, obstacle dans une cavité refusé ;
+        couronne (aire de $D$, solution exacte dans la cavité), carré percé
+        (aire exacte), centre d'une source dans une cavité, face STEP percée
+        de deux trous ;
   \item \textbf{raffinement} : sans source, nœuds de $\partial\beta$
         identiques au découpage uniforme et disque inchangé ; seuls les cinq
-        coins saillants du L sont raffinés ; au moins trois éléments dans
-        l'interstice des disques tangents ; deux disques à $0.005$ maillés
-        avec raffinement ; plaque mince non prise pour un interstice ; critère
-        de courbure désactivé par défaut et effectif une fois activé.
+        coins saillants du L sont raffinés ; dans une cavité en L, seul le
+        coin rentrant du L est raffiné ; au moins trois éléments dans
+        l'interstice des disques tangents et dans une fente à fond plat ;
+        coin aigu d'une réunion non pris pour un interstice ; deux disques à
+        $0.005$ maillés avec raffinement ; plaque mince non prise pour un
+        interstice ; critère de courbure désactivé par défaut et effectif une
+        fois activé.
 \end{itemize}
 
 \subsection{Utilisation de \texttt{main.py}}
@@ -1737,7 +1939,8 @@ Commande & Effet \\
                                         \texttt{cacahuete\_dirichlet}, \\
                                       & \texttt{polygone}, \texttt{step}, \texttt{puzzle},
                                         \texttt{puzzle\_gauss}, \\
-                                      & \texttt{non\_connexe}, \texttt{tangents}, \texttt{eloignes} \\
+                                      & \texttt{non\_connexe}, \texttt{tangents}, \texttt{couronne}, \\
+                                      & \texttt{fusion}, \texttt{eloignes} \\
 \texttt{python3 main.py --step f.step} & obstacle lu dans un fichier STEP / IGES / BREP
                                          (\texttt{--echelle}) \\
 \texttt{python3 main.py --obstacle \dots} & $\beta$ composé, option à répéter
@@ -1774,6 +1977,7 @@ Composante & Paramètres \\
 \hline
 \texttt{disque}    & centre $(x, y)$, rayon $R$ \\
 \texttt{cacahuete} & centre $(x, y)$, $r_0$, $\varepsilon$ \\
+\texttt{couronne}  & centre $(x, y)$, rayons $R > r > 0$ (obstacle troué) \\
 \texttt{polygone}  & translation $(x, y)$, puis sommets $x_1\ y_1\ x_2\ y_2 \dots$
                      (au moins trois ; L par défaut) \\
 \texttt{fichier}   & chemin d'un fichier CAO, translation $(x, y)$, échelle \\
@@ -1785,11 +1989,16 @@ ses composantes sont ajoutées. Par exemple
 \[
 \texttt{python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0}
 \]
-réunit un disque de rayon $1$ et le polygone en L translaté de $(4, 0)$. Une
-seule composante donne un obstacle connexe, plusieurs un
+réunit un disque de rayon $1$ et le polygone en L translaté de $(4, 0)$. Les
+composantes qui se chevauchent sont réunies (section~\ref{sec:union}) ; on
+obtient un obstacle connexe, éventuellement troué, ou un
 \texttt{MultiObstacle} (section~\ref{sec:step}), traité comme à la
 section~\ref{sec:construction} que les composantes soient proches ou
-éloignées.
+éloignées. Par exemple
+\[
+\texttt{python3 main.py --obstacle couronne 0 0 2 1 --obstacle disque 1.5 0 0.8}
+\]
+donne une couronne dont la cavité est entamée par le disque.
 
 \paragraph{Menu.} Sans argument, le programme propose : \texttt{composer}
 (obstacles ajoutés un par un), \texttt{validation}, \texttt{tous} ou
@@ -1809,7 +2018,7 @@ ci-dessus.
   \item Les figures sont rangées dans \texttt{resultats/}, un sous-dossier
         par obstacle : \texttt{disque}, \texttt{cacahuete}, \texttt{polygone},
         \texttt{step}, \texttt{puzzle}, \texttt{non\_connexe},
-        \texttt{tangents}, \texttt{eloignes},
+        \texttt{tangents}, \texttt{couronne}, \texttt{fusion}, \texttt{eloignes},
         \texttt{compose/<types>\_<empreinte>} (obstacle
         composé, l'empreinte distinguant deux jeux de paramètres) et le nom
         du fichier en minuscules pour \texttt{--step} (suivi de

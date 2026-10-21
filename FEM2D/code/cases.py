@@ -9,7 +9,8 @@ from matplotlib.path import Path
 import numpy as np
 
 from config import HERE, K, SIGMA, k_suffix, out_path
-from geometry import MultiObstacle, Polygon, disk, domain_from_obstacle, from_step, peanut
+from geometry import (MultiObstacle, Polygon, annulus, disk, domain_from_obstacle, from_step,
+                      peanut, union)
 from mesh import build_mesh
 from plots import plot_mesh, plot_solution
 from solver import solve
@@ -67,7 +68,8 @@ def center_error(mesh, Lx, Ly, x0, y0):
     """Message d'erreur si (x0, y0) n'est pas dans D = Omega - beta (beta tel que maillé), None sinon."""
     if not (0 <= x0 <= Lx and 0 <= y0 <= Ly):
         return f"le point ({x0:g}, {y0:g}) est hors de Omega = [0, {Lx:g}] x [0, {Ly:g}]"
-    if any(Path(xy).contains_point((x0, y0)) for xy in mesh.beta_points):
+    # Dans beta : à l'intérieur d'un nombre impair de courbes de dbeta (les cavités sont dans D)
+    if sum(Path(xy).contains_point((x0, y0)) for xy in mesh.beta_points) % 2:
         return f"le point ({x0:g}, {y0:g}) est dans l'obstacle beta"
     return None
 
@@ -77,6 +79,11 @@ def obstacles_eloignes():
     return MultiObstacle([disk((0.0, 0.0), 0.8),
                           peanut((6.0, 1.0), 0.7, 0.35),
                           Polygon([(1.0, 4.0), (1.0, 6.0), (2.0, 6.0), (2.0, 5.0), (4.0, 5.0), (4.0, 4.0)])])
+
+
+def couronnes_secantes():
+    """Deux couronnes dont les cavités se coupent : leur réunion a trois cavités."""
+    return union([annulus((0.0, 0.0), 2.0, 1.4), annulus((1.5, 0.0), 2.0, 1.4)])
 
 
 _PEANUT = partial(peanut, PEANUT["center"], PEANUT["r0"], PEANUT["eps"])
@@ -94,6 +101,9 @@ CASES = {
                         "non_connexe"),
     "tangents": Case("deux disques presque tangents (disques_tangents.step)", partial(from_step, TANGENTS),
                      "tangents"),
+    "couronne": Case("couronne (beta troué : cavité de D séparée du reste)",
+                     partial(annulus, DISK["center"], 1.5, 0.8), "couronne"),
+    "fusion": Case("deux couronnes sécantes (réunion : trois cavités)", couronnes_secantes, "fusion"),
     "eloignes": Case("trois obstacles éloignés, u = g_beta = 1 + x/Lx sur dbeta",
                      obstacles_eloignes, "eloignes", g_beta=g_dirichlet),
 }
@@ -116,6 +126,8 @@ KINDS = {
     "cacahuete": ("cacahuète r = r0 (1 + eps cos 2t), centre (x, y)", ["x", "y", "r0", "eps"],
                   [0.0, 0.0, 0.8, 0.35]),
     "polygone": ("polygone (en L par défaut) translaté de (x, y)", ["x", "y"], [0.0, 0.0]),
+    "couronne": ("couronne r <= |x - (x, y)| <= R (beta troué)", ["x", "y", "R", "r"],
+                 [0.0, 0.0, 1.5, 0.8]),
     "fichier": ("fichier STEP / IGES / BREP translaté de (x, y)", ["x", "y", "echelle"], [0.0, 0.0, 1.0]),
 }
 L_SHAPE = tuple(v for xy in np.array(POLYGON) - POLYGON[0] for v in xy)
@@ -159,7 +171,8 @@ def check_spec(spec):
 def make_component(kind, *args):
     """Composantes de beta décrites par (type, paramètres) : liste d'obstacles connexes.
 
-    disque x y R | cacahuete x y r0 eps | polygone x y [x1 y1 x2 y2 ...] | fichier chemin x y [echelle]
+    disque x y R | cacahuete x y r0 eps | couronne x y R r | polygone x y [x1 y1 x2 y2 ...] |
+    fichier chemin x y [echelle]
     """
     if kind == "fichier":
         path, args = args[0], [float(a) for a in args[1:]]
@@ -173,6 +186,9 @@ def make_component(kind, *args):
     if kind == "cacahuete":
         x, y, r0, eps = args
         return [peanut((x, y), r0, eps)]
+    if kind == "couronne":
+        x, y, R, r = args
+        return [annulus((x, y), R, r)]
     if kind == "polygone":
         (x, y), vertices = args[:2], args[2:]
         if not polygon_vertices_ok(vertices):
@@ -182,9 +198,9 @@ def make_component(kind, *args):
 
 
 def compose(specs):
-    """beta = réunion des composantes décrites par specs, une suite de (type, *paramètres)."""
-    comps = [c for spec in specs for c in make_component(*spec)]
-    return comps[0] if len(comps) == 1 else MultiObstacle(comps)
+    """beta = réunion des composantes décrites par specs, une suite de (type, *paramètres) ;
+    celles qui se chevauchent sont fusionnées (union)."""
+    return union([c for spec in specs for c in make_component(*spec)])
 
 
 def composed_case(specs):

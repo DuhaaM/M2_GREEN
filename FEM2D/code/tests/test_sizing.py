@@ -4,7 +4,7 @@ import pytest
 
 from cases import CASES, DISK, POLYGON, prepare
 from config import LX, LY, MeshParams
-from geometry import MultiObstacle, Polygon, disk, domain_from_obstacle
+from geometry import HoledObstacle, MultiObstacle, Polygon, disk, domain_from_obstacle, union
 from mesh import build_mesh
 from sizing import CORNER, graded_params, size_field
 
@@ -53,12 +53,50 @@ def test_polygon_singular_corners_only():
             assert shortest < 1.5 * h_beta / CORNER
 
 
+def test_cavity_corners():
+    """Cavité en L dans un carré : dans la cavité, seul le coin rentrant du L (angle de D = 3pi/2)
+    est singulier ; ses 5 coins saillants (angle de D = pi/2) ne le sont pas. Les coins du carré
+    extérieur (angle de D = 3pi/2) sont singuliers."""
+    h_beta = 0.15
+    hole = np.array(POLYGON) - POLYGON[0] + (1.0, 1.0)
+    square = [(0, 0), (6, 0), (6, 4.5), (0, 4.5)]
+    obstacle, Lx, Ly, shift = domain_from_obstacle(HoledObstacle(Polygon(square), [Polygon(hole)]),
+                                                   0.5, 2.5, 0.9)
+    mesh = build_mesh(obstacle, Lx, Ly, 0.5, h_beta, 0.8, 0.9, refine=1.0)
+    for (length, mid), corners, singular in zip(beta_spacing(mesh), (square, hole),
+                                                ([0, 1, 2, 3], [3])):
+        d = np.linalg.norm(mid[:, None] - (np.array(corners) + shift)[None], axis=-1)
+        for c in range(len(corners)):
+            shortest = length[(d.argmin(axis=1) == c) & (d.min(axis=1) < 0.5)].min()
+            assert (shortest < 1.5 * h_beta / CORNER) == (c in singular)
+
+
 def test_gap_resolved():
     """Deux disques à 0.05 : au moins trois éléments dans la largeur de l'interstice."""
     mesh, Lx, Ly = prepare(CASES["tangents"], MeshParams())
     for length, mid in beta_spacing(mesh):
         near_gap = np.linalg.norm(mid - [Lx / 2, Ly / 2], axis=1) < 0.05
         assert length[near_gap].max() < 0.05 / 3 * 1.2
+
+
+def test_acute_corner_not_a_gap():
+    """Disque et carré fusionnés : aux points d'intersection, D a un coin aigu (≈ 41°) dont les
+    deux côtés sont proches près du sommet ; ce n'est pas un interstice (u y est régulière)."""
+    merged = union([disk((0, 0), 2), Polygon([(1.5, -1.5), (4.5, -1.5), (4.5, 1.5), (1.5, 1.5)])])
+    field = size_field([merged], merged.inside, 0.15, 1.0)
+    crossings = np.array([[1.5, np.sqrt(4 - 1.5**2)], [1.5, -np.sqrt(4 - 1.5**2)]])
+    near = np.linalg.norm(field.points[:, None] - crossings[None], axis=-1).min(axis=1) < 0.15
+    assert not near.any()
+
+
+def test_slot_still_a_gap():
+    """Fente de largeur 0.1 à fond plat (deux coins saillants de D sur le chemin d'un bord à
+    l'autre) : toujours un interstice, au moins trois éléments dans la largeur."""
+    slot = Polygon([(0, 0), (3, 0), (3, 2), (1.55, 2), (1.55, 0.8), (1.45, 0.8), (1.45, 2), (0, 2)])
+    field = size_field([slot], slot.inside, 0.15, 1.0)
+    in_slot = (np.abs(field.points[:, 0] - 1.5) < 0.06) & (field.points[:, 1] > 1.0)
+    assert in_slot.sum() > 10
+    assert field.sizes[in_slot].max() <= 0.1 / 3 + 1e-12
 
 
 def test_refinement_fixes_inverted_elements():

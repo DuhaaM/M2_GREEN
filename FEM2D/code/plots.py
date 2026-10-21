@@ -2,6 +2,8 @@
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
+from matplotlib.patches import PathPatch
+from matplotlib.path import Path
 from matplotlib.tri import Triangulation
 import numpy as np
 
@@ -34,10 +36,18 @@ def plot_triangulation(mesh):
 
 
 def draw_beta(ax, mesh):
-    for xy in mesh.beta_points:
-        pts = np.vstack((xy, xy[:1]))
-        ax.fill(pts[:, 0], pts[:, 1], color="0.8", zorder=3)
+    """beta en gris : chaque courbe de dbeta est orientée selon la parité du nombre de courbes
+    qui l'entourent (bord extérieur direct, bord de trou indirect), et le chemin composé est
+    rempli avec la règle non nulle, ce qui laisse les cavités vides."""
+    loops = [np.vstack((xy, xy[:1])) for xy in mesh.beta_points]
+    parts = []
+    for k, pts in enumerate(loops):
+        depth = sum(Path(other).contains_point(pts[0]) for j, other in enumerate(loops) if j != k)
+        area = pts[:-1, 0] @ pts[1:, 1] - pts[:-1, 1] @ pts[1:, 0]
+        parts.append(pts if (area > 0) == (depth % 2 == 0) else pts[::-1])
         ax.plot(pts[:, 0], pts[:, 1], "k", lw=1.2, zorder=4)
+    ax.add_patch(PathPatch(Path.make_compound_path(*map(Path, parts)), facecolor="0.8",
+                           edgecolor="none", zorder=3))
 
 
 def mesh_figure(mesh):
