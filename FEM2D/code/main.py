@@ -1,7 +1,8 @@
 """Validation (solution manufacturée, étude de convergence) et cas d'application.
 
-Problème : -Δu + k u = f dans D = Omega - beta, u = 0 sur dOmega, u = g_beta sur dbeta
-(k >= 0 constant, option --k, 1 par défaut).
+Problème : -div(a grad u) + k u = f dans D = Omega - beta ; par défaut a = 1, k = 1, u = 0 sur
+dOmega et u = g_beta sur dbeta. a > 0, k >= 0 et f sont des nombres ou des expressions de x, y
+(options --a, --k, --f) ; les conditions aux limites se choisissent par zone (option --cl).
 
 Point d'entrée (sections 6 et 7 de main.tex). Le code est réparti en modules :
     config.py (paramètres), cases.py (obstacles et cas), plots.py (figures),
@@ -13,24 +14,70 @@ Lancer :
     python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0
                                           plusieurs obstacles, type choisi pour chacun
     python3 main.py puzzle --gauss 2 3    f gaussienne avec f(2, 3) = 1 (option --sigma)
+    python3 main.py disque --f "sin(pi*x/Lx)" --a "1 + 9*(x > Lx/2)" --k 0
+                                          source et coefficients donnés par des expressions
+    python3 main.py disque --cl beta robin 5 20 --cl gauche neumann 0
+                                          a du/dn + 5 u = 20 sur dbeta, flux nul sur x = 0
     python3 main.py tous                  tous les cas en parallèle, sans validation du maillage
     python3 main.py erreurs --h 0.25      erreur de chaque élément (cas de validation), au clic
+
+
 Le maillage est affiché et doit être validé avant l'assemblage et la résolution ; la source f
 (celle du cas, ou une gaussienne f(x0, y0) = 1) se choisit en cliquant (x0, y0) sur le maillage
 ou en saisissant x0, y0 sous la figure, ou à défaut au terminal après validation.
+Zones de --cl : omega (les quatre côtés), bas (y = 0), droite (x = Lx), haut (y = Ly), gauche
+(x = 0), beta (toutes les courbes de dbeta) ou beta1, beta2, ... (numéros affichés sur le
+maillage). Conditions, n normale sortante de D : dirichlet [G] (u = G), neumann [G]
+(a du/dn = G), robin ALPHA [G] (a du/dn + ALPHA u = G) ; G vaut 0 par défaut.
 Les figures sont écrites dans le dossier resultats/ à côté de ce fichier, un sous-dossier par
 obstacle (maillage.png, solution*.png), plus resultats/validation/ ; suffixe _k<valeur> pour les
-solutions et la validation si k n'est pas 1.
+solutions et la validation si k n'est pas 1. Chaque solution est aussi exportée (solution*.vtu
+pour ParaView, solution*.csv : x, y, u) avec ses grandeurs (grandeurs*.txt : intégrales,
+flux sortant par zone de bord et bilan).
 """
 import argparse
 import os
 
-from cases import CASES, Case, check_spec, composed_case, step_file_case, with_gauss
+from cases import CASES, Case, check_spec, composed_case, step_file_case, with_gauss, with_problem
 from config import K, OUT, SIGMA, MeshParams
+from expressions import number_or_expression
+from mesh import SIDES
+from solver import BC_KINDS
 from ui import choose_case, interactive
 from validation import run_all, run_convergence, show_errors
 
 MODES = ["validation", "tous", "erreurs"]
+
+
+def expression_arg(text):
+    """Type argparse : nombre ou expression, avec la raison du refus dans le message d'erreur."""
+    try:
+        return number_or_expression(text)
+    except ValueError as err:
+        raise argparse.ArgumentTypeError(str(err))
+
+
+def check_bc(spec):
+    """--cl ZONE TYPE [ALPHA] [G] -> (zone, type, g, alpha), nombres ou expressions vérifiées."""
+    if len(spec) < 2:
+        raise ValueError("ZONE TYPE [ALPHA] [G] attendus")
+    zone, kind, values = spec[0].lower(), spec[1].lower(), spec[2:]
+    zones = ["omega", "beta"] + SIDES
+    if zone not in zones and not (zone.startswith("beta") and zone[4:].isdigit() and int(zone[4:]) > 0):
+        raise ValueError(f"zone inconnue : {zone} (choix : {', '.join(zones)}, beta1, beta2, ...)")
+    if kind not in BC_KINDS:
+        raise ValueError(f"condition inconnue : {kind} (choix : {', '.join(BC_KINDS)})")
+    n_max = 2 if kind == "robin" else 1
+    if len(values) > n_max or (kind == "robin" and not values):
+        raise ValueError(f"{kind} : paramètres attendus {'ALPHA [G]' if kind == 'robin' else '[G]'}, "
+                         f"reçu {' '.join(values) or 'aucun'}")
+    values = [number_or_expression(v) for v in values]
+    if kind == "robin":
+        alpha, g = values[0], values[1] if len(values) > 1 else 0.0
+        if not isinstance(alpha, str) and alpha < 0:
+            raise ValueError("robin : ALPHA doit être positif ou nul")
+        return zone, kind, g, alpha
+    return zone, kind, values[0] if values else 0.0, 0.0
 
 
 def parse_args():
@@ -43,7 +90,15 @@ def parse_args():
                              "couronne x y R r | "
                              "polygone x y [x1 y1 ...] | fichier chemin x y [echelle]")
     parser.add_argument("--echelle", type=float, default=1.0, help="facteur d'échelle du fichier CAO")
-    parser.add_argument("--k", type=float, default=K, help=f"coefficient k >= 0 de -Δu + k u = f [{K:g}]")
+    parser.add_argument("--k", type=expression_arg, default=K,
+                        help=f"coefficient k >= 0 : nombre ou expression de x, y [{K:g}]")
+    parser.add_argument("--a", type=expression_arg,
+                        help="coefficient de diffusion a > 0 : nombre ou expression de x, y [1]")
+    parser.add_argument("--f", type=expression_arg, metavar="EXPR",
+                        help="source f : nombre ou expression de x, y, Lx, Ly (ex. \"exp(-x) * sin(pi*y/Ly)\")")
+    parser.add_argument("--cl", nargs="+", action="append", metavar="ARG", dest="bcs",
+                        help="condition aux limites, à répéter : ZONE dirichlet [G] | ZONE neumann [G] | "
+                             "ZONE robin ALPHA [G] (voir l'aide générale pour les zones)")
     parser.add_argument("--gauss", nargs=2, type=float, metavar=("X0", "Y0"),
                         help="f gaussienne avec f(X0, Y0) = 1, centre dans Omega = [0, Lx] x [0, Ly] "
                              "(sans cette option, la source est demandée après validation du maillage)")
@@ -51,11 +106,23 @@ def parse_args():
     parser.add_argument("-y", "--oui", action="store_true", help="valider le maillage sans l'afficher")
     for name, value in vars(MeshParams()).items():
         parser.add_argument(f"--{name.replace('_', '-')}", type=float, default=value, dest=name)
+    parser.formatter_class = argparse.RawDescriptionHelpFormatter
+    parser.epilog = __doc__.split("\n", 2)[2]
     args = parser.parse_args()
-    if args.k < 0:
+    if not isinstance(args.k, str) and args.k < 0:
         parser.error("--k : k doit être positif ou nul (sinon a n'est plus coercive)")
     if args.sigma <= 0:
         parser.error("--sigma : sigma doit être strictement positif")
+    if not isinstance(args.a, (str, type(None))) and args.a <= 0:
+        parser.error("--a : a doit être strictement positif")
+    if args.f is not None and args.gauss:
+        parser.error("--f et --gauss : choisir l'une des deux sources")
+    try:
+        args.bcs = [check_bc(spec) for spec in args.bcs or []]
+    except ValueError as err:
+        parser.error(f"--cl : {err}")
+    if args.obstacle in MODES and (args.f is not None or args.a is not None or args.bcs):
+        parser.error(f"--f, --a, --cl : sans effet en mode {args.obstacle} (solution manufacturée)")
     if min(args.h, args.h_beta, args.delta) <= 0:
         parser.error("--h, --h-beta, --delta : valeurs strictement positives attendues")
     if args.raffinement < 0:
@@ -88,7 +155,9 @@ def main():
     if isinstance(choice, Case):
         if args.gauss:
             choice = with_gauss(choice, *args.gauss, args.sigma)
-        choice = interactive(choice, params, args.oui, args.k, ask_source=not (args.gauss or args.oui),
+        choice = with_problem(choice, args.f, args.a, args.bcs)
+        fixed_source = args.gauss or args.f is not None or args.oui
+        choice = interactive(choice, params, args.oui, args.k, ask_source=not fixed_source,
                              sigma=args.sigma)
     if choice == "validation":
         run_convergence(args.k)

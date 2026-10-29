@@ -48,6 +48,11 @@ def draw_beta(ax, mesh):
         ax.plot(pts[:, 0], pts[:, 1], "k", lw=1.2, zorder=4)
     ax.add_patch(PathPatch(Path.make_compound_path(*map(Path, parts)), facecolor="0.8",
                            edgecolor="none", zorder=3))
+    if len(loops) > 1:  # numéros des courbes de dbeta (zones beta1, beta2, ... de --cl)
+        for k, pts in enumerate(loops):
+            top = pts[np.argmax(pts[:, 1])]
+            ax.annotate(f"beta{k + 1}", top, xytext=(0, 3), textcoords="offset points", ha="center",
+                        va="bottom", fontsize=8, color="tab:red", zorder=5)
 
 
 def mesh_figure(mesh):

@@ -1,4 +1,5 @@
 """Paramètres par défaut (section 7.1 de main.tex) et dossier des résultats."""
+import hashlib
 import os
 from dataclasses import dataclass
 
@@ -35,5 +36,8 @@ class MeshParams:
 
 
 def k_suffix(k):
-    """Suffixe des figures qui dépendent de k : vide pour la valeur par défaut."""
+    """Suffixe des figures qui dépendent de k : vide pour la valeur par défaut, empreinte du texte
+    pour une expression."""
+    if isinstance(k, str):
+        return "_k" + hashlib.sha1(k.encode()).hexdigest()[:6]
     return "" if k == K else f"_k{k:g}"

@@ -2,7 +2,8 @@
 
 Sections 3.2 et 3.3 de main.tex. Le résultat est un objet Mesh contenant :
     coords (N, 2), tri (n_T, 6), quad (n_Q, 9), bnd (indices des nœuds de bord),
-    bnd_beta (indices des nœuds de bord situés sur dbeta, sous-ensemble de bnd).
+    bnd_beta (indices des nœuds de bord situés sur dbeta, sous-ensemble de bnd),
+    edges (arêtes P2 de bord) et edge_zone (zone de chaque arête : côté de Omega ou courbe de dbeta).
 """
 from dataclasses import dataclass
 
@@ -13,6 +14,10 @@ from scipy import ndimage
 from assembly import check_jacobians
 from geometry import loops_of
 from sizing import graded_params, size_field
+
+# Zones de bord : côtés de Omega = [0, Lx] x [0, Ly] (y = 0, x = Lx, y = Ly, x = 0), puis courbes
+# de dbeta beta1, beta2, ... (bords extérieurs des composantes, puis bords de leurs trous)
+SIDES = ["bas", "droite", "haut", "gauche"]
 
 
 @dataclass
@@ -25,6 +30,9 @@ class Mesh:
     beta_points: list  # points de discrétisation de dbeta, un tableau par courbe fermée
     # (bord extérieur ou bord de trou ; un point est dans beta s'il est dans un nombre impair
     # de ces courbes)
+    edges: np.ndarray  # arêtes P2 de bord (m, 3) : deux extrémités puis milieu
+    edge_zone: np.ndarray  # (m,) : numéro de la zone de chaque arête dans zones
+    zones: list  # noms des zones de bord : SIDES puis beta1, beta2, ...
 
     @property
     def n_nodes(self):
@@ -290,6 +298,10 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
     a, b = np.divmod(key, n)
     mid_xy = 0.5 * (P[a] + P[b])
     mid_on_beta = np.zeros(len(key), dtype=bool)
+    tol = 1e-10 * h
+    edge_zone = -np.ones(len(key), dtype=int)  # zone de chaque arête, -1 : arête intérieure
+    for z, (d, value) in enumerate([(1, 0.0), (0, Lx), (1, Ly), (0, 0.0)]):  # ordre de SIDES
+        edge_zone[(np.abs(P[a, d] - value) < tol) & (np.abs(P[b, d] - value) < tol)] = z
     # Arête posée sur dbeta : extrémités gamma_c(t_k) et gamma_c(t_{k+1}), milieu pris sur la courbe
     comp_of, k_of = -np.ones(n, dtype=int), np.zeros(n, dtype=int)
     for c, nodes in enumerate(beta_glob):
@@ -304,6 +316,7 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
         t_mid = 0.5 * (t[lo] + t[hi] + 2 * np.pi * (hi == 0))
         mid_xy[sel] = curves[c].gamma(t_mid)
         mid_on_beta[sel] = True
+        edge_zone[sel] = len(SIDES) + c
     mid_id = n + inv.ravel()
     n_tri = len(tri3)
     tri = np.column_stack((tri3, mid_id[:3 * n_tri].reshape(-1, 3)))
@@ -315,13 +328,16 @@ def build_mesh(obstacle, Lx, Ly, h, h_beta, delta, m_beta, refine=0.0):
 
     # 5. Nœuds de bord
     coords = np.vstack((P, mid_xy, centers))
-    tol = 1e-10 * h
     x, y = coords[:, 0], coords[:, 1]
     on_omega = (np.abs(x) < tol) | (np.abs(x - Lx) < tol) | (np.abs(y) < tol) | (np.abs(y - Ly) < tol)
     on_beta = np.concatenate((comp_of >= 0, mid_on_beta, np.zeros(len(ci), dtype=bool)))
     bnd = np.nonzero(on_omega | on_beta)[0]
     bnd_beta = np.nonzero(on_beta)[0]
 
-    mesh = Mesh(coords=coords, tri=tri, quad=quad, bnd=bnd, bnd_beta=bnd_beta, beta_points=beta_xy)
+    on_edge = edge_zone >= 0
+    edges = np.column_stack((a, b, n + np.arange(len(key))))[on_edge]
+    zones = SIDES + [f"beta{c + 1}" for c in range(len(curves))]
+    mesh = Mesh(coords=coords, tri=tri, quad=quad, bnd=bnd, bnd_beta=bnd_beta, beta_points=beta_xy,
+                edges=edges, edge_zone=edge_zone[on_edge], zones=zones)
     check_jacobians(mesh)  # éléments courbes retournés : refusés dès le maillage
     return mesh

@@ -9,6 +9,7 @@ import numpy as np
 from cases import (KINDS, center_error, composed_case, compute, gauss_center, mesh_summary,
                    polygon_vertices_ok, prepare, with_gauss)
 from config import K, SIGMA, MeshParams, out_path
+from expressions import fmt
 from plots import has_display, mesh_figure, save_figure
 
 
@@ -287,7 +288,7 @@ def interactive(case, params, auto_accept=False, k=K, ask_source=True, sigma=SIG
     while True:
         print(f"\n=== {case.name} : h = {params.h:g}, h_beta = {params.h_beta:g}, "
               f"delta = {params.delta:g}, m_beta = {params.m_beta:g}, "
-              f"raffinement = {params.raffinement:g}, k = {k:g} ===")
+              f"raffinement = {params.raffinement:g}, k = {fmt(k)} ===")
         try:
             mesh, Lx, Ly = prepare(case, params)
         except ValueError as err:
@@ -307,7 +308,10 @@ def interactive(case, params, auto_accept=False, k=K, ask_source=True, sigma=SIG
             elif ask_source and not has_display():
                 case = ask_gauss(case, mesh, Lx, Ly)  # pas de fenêtre où cliquer : question au terminal
             print("Maillage validé : assemblage et résolution...")
-            print(compute(case, mesh, Lx, Ly, k))
+            try:
+                print(compute(case, mesh, Lx, Ly, k))
+            except ValueError as err:  # zone de bord inconnue, coefficient négatif...
+                raise SystemExit(f"Erreur : {err}")
             return None
         answer = ask("Maillage refusé. [p] modifier les paramètres, [o] changer d'obstacle, "
                      "[q] quitter : ", "q").lower()

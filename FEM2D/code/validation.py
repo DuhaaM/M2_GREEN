@@ -10,9 +10,10 @@ from matplotlib.path import Path
 from matplotlib.widgets import RadioButtons
 import numpy as np
 
-from assembly import element_errors, total_errors
+from assembly import element_errors, evaluate, total_errors
 from cases import CASES, DISK, application
 from config import K, LX, LY, MeshParams, k_suffix, out_path
+from expressions import coefficient, fmt
 from geometry import disk
 from mesh import build_mesh
 from plots import draw_beta, has_display, plot_convergence, plot_solution, save_figure
@@ -57,7 +58,7 @@ def manufactured(cx, cy, R, G, grad_G, lap_G, k=K):
 
     def f(x, y):
         (Sx, Sy), (px, py) = grad_S(x, y), grad_p(x, y)
-        return ((k + a**2 + b**2) * S(x, y) * p(x, y)
+        return ((evaluate(k, x, y) + a**2 + b**2) * S(x, y) * p(x, y)
                 - 2 * (Sx * px + Sy * py)
                 - S(x, y) * (4 + lap_G(x, y)))
 
@@ -65,7 +66,9 @@ def manufactured(cx, cy, R, G, grad_G, lap_G, k=K):
 
 
 def validation_problem(h, k=K):
-    """Disque de validation résolu pour le pas h : (maillage, U, erreurs locales)."""
+    """Disque de validation résolu pour le pas h : (maillage, U, erreurs locales).
+    k : nombre ou expression de x, y."""
+    k = coefficient(k, LX, LY)
     obstacle = disk(DISK["center"], DISK["R"])
     u_ex, grad_u_ex, f = manufactured(*DISK["center"], DISK["R"], G_BETA["G"], G_BETA["grad"],
                                       G_BETA["lap"], k)
@@ -123,12 +126,12 @@ def validation_step(i, h, k=K):
     l2, h1 = total_errors(errs)
     if i == 0:
         plot_solution(mesh, U, out_path("validation", f"solution{k_suffix(k)}.png"),
-                      f"Validation : $u_h$ pour $h = {h}$, $k = {k:g}$")
+                      f"Validation : $u_h$ pour $h = {h}$, k = {fmt(k)}")
     return mesh.n_nodes, l2, h1, element_error_stats(errs)
 
 
 def validation_report(results, k=K):
-    print(f"=== Validation : disque, solution manufacturée, k = {k:g} ===")
+    print(f"=== Validation : disque, solution manufacturée, k = {fmt(k)} ===")
     e_l2, e_h1 = [], []
     print(f"{'h':>8} {'nœuds':>8} {'erreur L2':>12} {'ordre':>6} {'erreur H1':>12} {'ordre':>6}")
     for i, (h, (n_nodes, l2, h1, _)) in enumerate(zip(HS, results)):
@@ -224,7 +227,7 @@ def show_errors(h, k=K):
     Un clic sur un élément affiche ses erreurs et son écart à la moyenne de son type.
     """
     mesh, _, errs = validation_problem(h, k)
-    print(f"=== Erreur par élément : disque de validation, h = {h:g}, k = {k:g} ===")
+    print(f"=== Erreur par élément : disque de validation, h = {h:g}, k = {fmt(k)} ===")
     print(STATS_HEADER)
     for name, s in element_error_stats(errs).items():
         print(stats_row(name, s))

@@ -9,11 +9,13 @@ from matplotlib.path import Path
 import numpy as np
 
 from config import HERE, K, SIGMA, k_suffix, out_path
+from expressions import coefficient, fmt
 from geometry import (MultiObstacle, Polygon, annulus, disk, domain_from_obstacle, from_step,
                       peanut, union)
 from mesh import build_mesh
 from plots import plot_mesh, plot_solution
-from solver import solve
+from post import export_csv, export_vtu, report
+from solver import BC, build_system, solve_system
 
 DISK = dict(center=(3.5, 2.5), R=1.0)
 PEANUT = dict(center=(3.1, 2.63), r0=0.8, eps=0.35)
@@ -34,6 +36,9 @@ class Case:
     suffix: str = ""                   # suffixe des figures solution*.png (variante du cas)
     g_beta: Optional[Callable] = None  # (Lx, Ly) -> g_beta ; None : u = 0 sur dbeta
     f: Optional[Callable] = None       # (Lx, Ly) -> (f, titre LaTeX) ; None : f = 1
+    a: object = None                   # coefficient a : nombre ou expression (str) ; None : a = 1
+    bcs: tuple = ()                    # conditions (zone, type, g, alpha), g et alpha nombres ou
+                                       # expressions ; s'ajoutent aux défauts (solver.zone_bcs)
 
 
 # Fonctions du module (et non des lambda) : les cas passent d'un processus à l'autre
@@ -57,6 +62,22 @@ def with_gauss(case, x0, y0, sigma=SIGMA):
     """Le même cas avec f gaussienne centrée en (x0, y0) ; suffixe de la solution complété."""
     return replace(case, f=partial(f_gauss, sigma=sigma, center=(x0, y0)),
                    suffix=f"{case.suffix}_gauss_{x0:g}_{y0:g}_s{sigma:g}")
+
+
+def f_expr(text, Lx, Ly):
+    """Source donnée par un nombre ou une expression de x, y (module expressions)."""
+    return coefficient(text, Lx, Ly), f"f = {fmt(text)}"
+
+
+def with_problem(case, f=None, a=None, bcs=()):
+    """Le même cas avec la source f, le coefficient a (expressions ou nombres) et les conditions
+    bcs ; le suffixe de la solution reçoit une empreinte de ces données."""
+    if f is None and a is None and not bcs:
+        return case
+    digest = hashlib.sha1(repr((f, a, tuple(bcs))).encode()).hexdigest()[:6]
+    return replace(case, f=partial(f_expr, f) if f is not None else case.f,
+                   a=a if a is not None else case.a, bcs=case.bcs + tuple(bcs),
+                   suffix=f"{case.suffix}_{digest}")
 
 
 def gauss_center(case):
@@ -230,19 +251,35 @@ def mesh_summary(mesh, Lx, Ly):
 
 
 def compute(case, mesh, Lx, Ly, k=K):
-    """Assemblage, résolution de -Δu + k u = f et figures, sur un maillage déjà construit."""
+    """Assemblage, résolution de -div(a grad u) + k u = f, figures, grandeurs (flux, bilan) et
+    exports VTU / CSV, sur un maillage déjà construit. k : nombre ou expression."""
     g_beta = case.g_beta(Lx, Ly) if case.g_beta else None
     f, f_title = case.f(Lx, Ly) if case.f else (lambda x, y: np.ones_like(x), "$f = 1$")
-    U = solve(mesh, f, g_beta, k)
+    k_fn = coefficient(k, Lx, Ly)
+    a = coefficient(case.a, Lx, Ly) if case.a is not None else 1.0
+    bcs = [(zone, BC(kind, coefficient(g, Lx, Ly), coefficient(alpha, Lx, Ly)))
+           for zone, kind, g, alpha in case.bcs]
+    system = build_system(mesh, f, k_fn, a, bcs, g_beta)
+    U = solve_system(system)
     plot_mesh(mesh, out_path(case.folder, "maillage.png"))
-    title = (f"Solution $u_h$ pour {f_title}" + (f", $k = {k:g}$" if k != K else "")
+    title = (f"Solution $u_h$ pour {f_title}" + (f", k = {fmt(k)}" if k != K else "")
+             + (f", a = {fmt(case.a)}" if case.a is not None else "")
              + (r", $u = g_\beta$ sur $\partial\beta$" if g_beta else ""))
-    plot_solution(mesh, U, out_path(case.folder, f"solution{case.suffix}{k_suffix(k)}.png"), title)
-    return f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}"
+    if case.bcs:
+        title += "\n" + " ; ".join(f"{zone} : {kind} " + (f"alpha = {fmt(alpha)}, " if kind == "robin" else "")
+                                   + f"g = {fmt(g)}" for zone, kind, g, alpha in case.bcs)
+    stem = f"solution{case.suffix}{k_suffix(k)}"
+    plot_solution(mesh, U, out_path(case.folder, f"{stem}.png"), title)
+    export_vtu(mesh, U, out_path(case.folder, f"{stem}.vtu"))
+    export_csv(mesh, U, out_path(case.folder, f"{stem}.csv"))
+    quantities = report(mesh, system, U, f, k_fn)
+    with open(out_path(case.folder, f"grandeurs{case.suffix}{k_suffix(k)}.txt"), "w") as out:
+        out.write(f"{case.name}, k = {fmt(k)}\n{title}\n{quantities}\n")
+    return f"min u_h = {U.min():.4e}, max u_h = {U.max():.4e}\n{quantities}"
 
 
 def application(case, params, k=K):
     """Cas complet sans validation du maillage (mode « tous »)."""
     mesh, Lx, Ly = prepare(case, params)
-    return "\n".join([f"\n=== Application : {case.name}, k = {k:g} ===",
+    return "\n".join([f"\n=== Application : {case.name}, k = {fmt(k)} ===",
                       mesh_summary(mesh, Lx, Ly), compute(case, mesh, Lx, Ly, k)])
