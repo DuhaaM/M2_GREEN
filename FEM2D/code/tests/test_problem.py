@@ -8,7 +8,7 @@ from assembly import edge_points, element_errors, total_errors
 from cases import DISK
 from config import LX, LY
 from expressions import check, expression, number_or_expression
-from geometry import disk
+from geometry import annulus, disk
 from mesh import build_mesh
 from post import boundary_fluxes, domain_integrals, export_csv, export_vtu
 from solver import BC, build_system, solve, solve_system
@@ -124,6 +124,40 @@ def test_pure_neumann_rejected():
     mesh = disk_mesh(0.5)
     with pytest.raises(ValueError, match="constante"):
         solve(mesh, 1.0, k=0.0, bcs=[("omega", BC("neumann")), ("beta", BC("neumann"))])
+
+
+def annulus_mesh():
+    """Couronne de centre (5, 5), cavité (beta2) séparée du reste de D."""
+    return build_mesh(annulus((5.0, 5.0), 2.0, 1.2), 10.0, 10.0, 0.5, 0.15, 0.8, 1.0)
+
+
+def in_cavity(x, y):
+    return (np.hypot(x - 5, y - 5) < 1.0).astype(float)
+
+
+@pytest.mark.parametrize("bcs, k", [
+    ([("beta2", BC("neumann"))], 0.0),                                   # cavité seule
+    ([("beta2", BC("robin", 0.0, 0.0))], 0.0),                           # Robin avec alpha = 0
+    ([("beta2", BC("neumann"))], lambda x, y: (np.hypot(x - 5, y - 5) > 1.5) * 1.0),  # k nul dans la cavité
+    ([("omega", BC("neumann")), ("beta1", BC("neumann"))], 0.0),         # reste de D seul
+    ([("beta2", BC("neumann"))], lambda x, y: np.zeros_like(x)),         # k fonction, nul partout
+])
+def test_cavity_without_control_rejected(bcs, k):
+    """Coercivité vérifiée pour chaque composante connexe de D, et pas seulement globalement."""
+    with pytest.raises(ValueError, match="constante"):
+        solve(annulus_mesh(), 1.0, k=k, bcs=bcs)
+
+
+@pytest.mark.parametrize("bc, k", [
+    (BC("neumann"), in_cavity),          # k > 0 dans la cavité seulement
+    (BC("robin", 0.0, 1.0), 0.0),        # alpha > 0
+    (BC("dirichlet"), 0.0),
+    (BC("neumann"), 1.0),
+])
+def test_cavity_with_control_accepted(bc, k):
+    """Solution bornée : f = 1, aucune valeur démesurée dans la cavité."""
+    U = solve(annulus_mesh(), 1.0, k=k, bcs=[("beta2", bc)])
+    assert np.abs(U).max() < 1e3
 
 
 def test_bad_coefficients_rejected():

@@ -10,9 +10,11 @@ Par défaut : u = 0 sur dOmega et u = g_beta sur dbeta (0 si g_beta est None).
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import splu
 
-from assembly import assemble, assemble_boundary, evaluate
+from assembly import assemble, assemble_boundary, element_blocks, evaluate
 from mesh import SIDES
 
 BC_KINDS = ("dirichlet", "neumann", "robin")
@@ -58,6 +60,25 @@ class System:
     a: object = 1.0     # coefficient de diffusion (flux des zones de Dirichlet, post.py)
 
 
+def check_coercive(mesh, A, fixed):
+    """Lève ValueError si une composante connexe de D (reste de D ou cavité de beta) ne porte
+    ni nœud de Dirichlet, ni Robin alpha > 0, ni k > 0 : l'indicatrice 1_c de la composante est
+    alors dans le noyau de A, soit 1_c^T A 1_c = int_c k + int_{dc} alpha nul aux arrondis près."""
+    blocks = [conn for _, conn, _ in element_blocks(mesh)]
+    rows = np.concatenate([np.repeat(conn[:, 0], conn.shape[1]) for conn in blocks])
+    cols = np.concatenate([conn.ravel() for conn in blocks])
+    graph = coo_matrix((np.ones(len(rows), dtype=bool), (rows, cols)), shape=(mesh.n_nodes, mesh.n_nodes))
+    n_comp, labels = connected_components(graph, directed=False)
+    for c in np.setdiff1d(np.arange(n_comp), labels[fixed]):
+        one = (labels == c).astype(float)
+        if one @ (A @ one) <= 1e-12 * A.diagonal()[labels == c].sum():
+            on_c = labels[mesh.edges[:, 0]] == c
+            zones = ", ".join(mesh.zones[z] for z in np.unique(mesh.edge_zone[on_c]))
+            raise ValueError(f"La composante connexe de D bordée par {zones} n'a ni condition de "
+                             "Dirichlet, ni condition de Robin avec alpha > 0, ni k > 0 : u n'y est "
+                             "définie qu'à une constante près.")
+
+
 def build_system(mesh, f, k=1.0, a=1.0, bcs=None, g_beta=None):
     """Assemble le système de -div(a grad u) + k u = f avec ses conditions aux limites."""
     if not callable(k) and k < 0:
@@ -75,10 +96,9 @@ def build_system(mesh, f, k=1.0, a=1.0, bcs=None, g_beta=None):
         else:
             Ab, Fb = assemble_boundary(mesh, edges, bc.alpha if bc.kind == "robin" else 0.0, bc.g)
             A, F = A + Ab, F + Fb
-    if not fixed.any() and not callable(k) and k == 0 and all(bc.kind == "neumann" for bc in zbc.values()):
-        raise ValueError("Neumann sur tout le bord avec k = 0 : u n'est définie qu'à une constante "
-                         "près. Imposer u (dirichlet) ou une condition de Robin sur une zone, ou k > 0.")
-    return System(A.tocsr(), F, fixed, U0, zbc, a)
+    A = A.tocsr()
+    check_coercive(mesh, A, fixed)
+    return System(A, F, fixed, U0, zbc, a)
 
 
 def solve_system(system):

@@ -45,6 +45,12 @@ Le cas $g_\beta = 0$ correspond à la condition homogène $u = 0$ sur
 $\partial D$. Le cas $k = 0$ est le problème de Poisson ; le code prend
 $k = 1$ par défaut.
 
+Le code traite aussi un problème plus général, avec des coefficients
+variables et une condition aux limites (Dirichlet, Neumann ou Robin) choisie
+pour chaque morceau du bord : il est défini à la section~\ref{sec:general}
+et sa discrétisation aux sections~\ref{sec:elementaires}
+et~\ref{sec:robin}. Le problème $(P)$ en est le cas par défaut.
+
 \section{Formulation variationnelle}
 
 On pose $V = H^1_0(D)$ et
@@ -130,7 +136,7 @@ k\|v\|_{L^2}^2 \ge \min(1, k)\, \|v\|_{H^1}^2$. Si $k = 0$, on utilise
 l'inégalité de Poincaré sur $V = H^1_0(D)$ ($D$ est borné) :
 $\|v\|_{L^2} \le C_P \|\nabla v\|_{L^2}$, d'où
 $a(v,v) = \|\nabla v\|_{L^2}^2 \ge \|v\|_{H^1}^2 / (1 + C_P^2)$. Dans
-les deux cas $a(v,v) \ge \alpha \|v\|_{H^1}^2$ avec $\alpha > 0$ : $a$ est
+les deux cas $a(v,v) \ge c_0 \|v\|_{H^1}^2$ avec $c_0 > 0$ : $a$ est
 continue et coercive, et $\ell$ est continue, de même que
 $v \mapsto \ell(v) - a(u_g, v)$. Le théorème s'applique à
 $u_0 \in V$ et à $u_h - u_{g,h} \in V_h$ : $(P_V)$ et $(P_h)$ ont chacun une
@@ -147,9 +153,9 @@ $u_h - w_h \in V_h$,
 = a(u - u_h, u - w_h) \le \|u - u_h\|_a\, \|u - w_h\|_a,
 \]
 donc $\|u - u_h\|_a = \min_{w_h \in V_{g,h}} \|u - w_h\|_a$, et avec
-$\alpha \|v\|_{H^1}^2 \le \|v\|_a^2 \le M \|v\|_{H^1}^2$,
+$c_0 \|v\|_{H^1}^2 \le \|v\|_a^2 \le M \|v\|_{H^1}^2$,
 \[
-\|u - u_h\|_{H^1} \le \sqrt{M / \alpha}\, \min_{w_h \in V_{g,h}} \|u - w_h\|_{H^1} .
+\|u - u_h\|_{H^1} \le \sqrt{M / c_0}\, \min_{w_h \in V_{g,h}} \|u - w_h\|_{H^1} .
 \]
 L'erreur ne dépend donc que de la capacité de $V_{g,h}$ à approcher $u$.
 L'interpolée nodale $I_h u$ appartient à $V_{g,h}$, puisque
@@ -165,6 +171,63 @@ L'erreur géométrique commise est du même ordre que l'erreur d'interpolation
 Pour un obstacle polygonal (section~\ref{sec:polygone}), $D_h = D$ et
 seule subsiste l'interpolation de $g_\beta$ aux nœuds de $\partial\beta$.
 
+
+\subsection{Problème général : coefficients variables et conditions mixtes}
+\label{sec:general}
+
+Le bord $\partial D$ est découpé en \emph{zones} : les quatre côtés de
+$\Omega$ et les courbes fermées de $\partial\beta$ (bords extérieurs des
+composantes de $\beta$, puis bords de leurs trous). Soient
+$\nu, k \in L^\infty(D)$ avec $\nu \ge \nu_0 > 0$ et $k \ge 0$. On résout
+\[
+(P_G)\quad -\operatorname{div}(\nu \nabla u) + k\, u = f \quad \text{dans } D,
+\]
+avec sur chaque zone l'une des trois conditions suivantes, où $n$ est la
+normale sortante de $D$ (sur $\partial\beta$, elle pointe donc vers
+l'intérieur de $\beta$) et $\partial_n u = \nabla u \cdot n$ :
+\[
+\begin{array}{lll}
+\text{Dirichlet} & u = g & \text{sur } \Gamma_D,\\[2pt]
+\text{Neumann}   & \nu\, \partial_n u = g & \text{sur } \Gamma_N,\\[2pt]
+\text{Robin}     & \nu\, \partial_n u + \alpha\, u = g & \text{sur } \Gamma_R,
+\quad \alpha \ge 0 .
+\end{array}
+\]
+$\Gamma_D$, $\Gamma_N$ et $\Gamma_R$ sont les réunions des zones de chaque
+type. Par défaut, $\nu = 1$ et toutes les zones sont de type Dirichlet, avec
+$g = 0$ sur $\partial\Omega$ et $g = g_\beta$ sur $\partial\beta$ : on
+retrouve $(P)$.
+
+On pose $V = \{ v \in H^1(D) : v = 0 \text{ sur } \Gamma_D \}$. La formule
+de Green, avec $v \in V$, donne $\int_D -\operatorname{div}(\nu\nabla u)\, v
+= \int_D \nu \nabla u \cdot \nabla v - \int_{\Gamma_N \cup \Gamma_R} \nu\,
+\partial_n u\, v\, \mathrm{d}s$, et on y remplace $\nu\, \partial_n u$ par sa
+valeur. Les conditions de Neumann et de Robin sont donc \emph{naturelles} :
+elles n'apparaissent pas dans l'espace, mais dans les formes
+\begin{align*}
+a(u, v) &= \int_D \nu \nabla u \cdot \nabla v + \int_D k\, u\, v
++ \int_{\Gamma_R} \alpha\, u\, v \,\mathrm{d}s,\\
+\ell(v) &= \int_D f\, v + \int_{\Gamma_N \cup \Gamma_R} g\, v \,\mathrm{d}s .
+\end{align*}
+Seule la condition de Dirichlet reste imposée dans l'espace, comme à la
+section précédente. La forme $a$ reste symétrique, et continue sur $H^1(D)$
+grâce au théorème de trace. On a
+\[
+a(v, v) \ge \nu_0 \|\nabla v\|_{L^2}^2 + \int_D k\, v^2
++ \int_{\Gamma_R} \alpha\, v^2\, \mathrm{d}s .
+\]
+Pour que $a$ soit coercive, il faut et il suffit que cette quantité ne
+s'annule pour aucune constante non nulle sur une composante connexe de $D$,
+c'est-à-dire que \textbf{chaque composante connexe de $D$} vérifie au moins
+l'une des conditions : son bord contient une zone de Dirichlet ; ou
+$\alpha \not\equiv 0$ sur une partie de son bord ; ou $k \not\equiv 0$ sur
+cette composante. Chaque cavité de $\beta$ étant une composante connexe de
+$D$ à part, la condition porte aussi sur elle. Le théorème de Lax--Milgram
+et le lemme de Céa s'appliquent alors comme plus haut, et les ordres
+attendus sont les mêmes pour $u$ assez régulière (ce que confirme la
+section~\ref{sec:validation-generale}). Si la condition n'est pas vérifiée,
+$u$ n'est définie qu'à une constante près sur la composante concernée, et le
+calcul est refusé (section~\ref{sec:robin}).
 
 \section{Maillage en 2D}
 
@@ -1068,7 +1131,7 @@ repèrent sur la géométrie seule, avant tout calcul :
 Le module \texttt{sizing.py} définit près de ces zones une taille réduite,
 appliquée à la discrétisation de $\partial\beta$ et à la triangulation de
 $\mathcal{T}$. Son intensité est réglée par le paramètre $r \ge 0$
-(\texttt{--raffinement}, $1$ par défaut) : les tailles visées sont divisées
+(\texttt{-{}-raffinement}, $1$ par défaut) : les tailles visées sont divisées
 par $r$, et $r = 0$ redonne exactement le maillage de la
 section~\ref{sec:construction}.
 
@@ -1571,6 +1634,16 @@ F^K = \sum_{q} w_q\, d_q\, f\big(\Phi_K(\hat{x}_q)\big)\, \Psi_q ,
 avec $R^K, M^K \in \mathbb{R}^{n_K \times n_K}$ symétriques et
 $F^K \in \mathbb{R}^{n_K}$. On pose $A^K = R^K + k\, M^K$.
 
+\paragraph{Coefficients variables.} Pour le problème $(P_G)$, les coefficients
+sont évalués aux points de quadrature $x_q = \Phi_K(\hat{x}_q)$ :
+\[
+A^K = \sum_{q} w_q\, d_q \Big( \nu(x_q)\, B_q^{\top} B_q
++ k(x_q)\, \Psi_q \Psi_q^{\top} \Big).
+\]
+On vérifie en même temps que $\nu(x_q) > 0$ et $k(x_q) \ge 0$ en tout point
+de quadrature, sinon le calcul est refusé. Le raisonnement ci-dessous sur
+les carrés ne vaut que pour des coefficients constants.
+
 \paragraph{Cas des carrés de la grille.} Pour une cellule de côté $h$,
 $J_q = \tfrac{h}{2} I$ et $d_q = \tfrac{h^2}{4}$ en tout point. On obtient
 \[
@@ -1649,12 +1722,108 @@ $V_h$). La première ligne de blocs donne alors
 Le terme $-A_{\mathcal{I}\mathcal{B}} G_{\mathcal{B}}$ est la version
 discrète de $-a(u_g, v)$ : il transporte la condition au bord dans le
 second membre. $A_{\mathcal{I}\mathcal{I}}$ est symétrique définie positive,
-donc le système admet une unique solution. On le résout avec
-\texttt{scipy.sparse.linalg.spsolve} (ou un gradient conjugué), puis on
-reconstruit $U$ en complétant par $U_{\mathcal{B}} = G_{\mathcal{B}}$. La
+donc le système admet une unique solution. On le résout par factorisation
+LU creuse (\texttt{scipy.sparse.linalg.splu}, avec une renumérotation
+symétrique et les pivots pris sur la diagonale, ce que permet le caractère
+défini positif), puis on reconstruit $U$ en complétant par $U_{\mathcal{B}} = G_{\mathcal{B}}$. La
 matrice $A$ et le vecteur $F$ sont assemblés comme dans le cas homogène :
 seul le second membre du système réduit change. Si $g_\beta = 0$, on
 retrouve $A_{\mathcal{I}\mathcal{I}} U_{\mathcal{I}} = F_{\mathcal{I}}$.
+
+\subsection{Conditions de Neumann et de Robin}
+\label{sec:robin}
+
+\paragraph{Zones de bord.} Lors de la numérotation des milieux d'arêtes, chaque
+arête dont les deux extrémités sont sur un même côté de $\Omega$, ou qui relie
+deux points consécutifs d'une courbe de $\partial\beta$, reçoit le numéro de
+sa zone. Les zones sont, dans cet ordre, \texttt{bas} ($y = 0$),
+\texttt{droite} ($x = L_x$), \texttt{haut} ($y = L_y$), \texttt{gauche}
+($x = 0$), puis \texttt{beta1}, \texttt{beta2}, \dots{} (une par courbe de
+$\partial\beta$).
+
+\paragraph{Termes de bord.} Une arête de bord $E$ a trois nœuds : ses extrémités
+$x_1$, $x_2$ et son milieu $x_3$, qui est sur la courbe pour une arête de
+$\partial\beta$. Elle est paramétrée de façon isoparamétrique, pour
+$s \in [0, 1]$, par
+\[
+x(s) = \sum_{m=1}^{3} x_m\, \theta_m(s),
+\qquad
+\theta_1 = (1 - s)(1 - 2s), \quad \theta_2 = s(2s - 1), \quad \theta_3 = 4 s (1 - s).
+\]
+On intègre avec la règle de Gauss--Legendre à 3 points sur $[0, 1]$ :
+$s_q = \tfrac12 + \tfrac12 \xi_q$ avec $\xi_q \in \{-\sqrt{3/5},\, 0,\, \sqrt{3/5}\}$,
+et $w_q \in \{\tfrac{5}{18},\, \tfrac{8}{18},\, \tfrac{5}{18}\}$. Avec
+$\Theta_q = (\theta_m(s_q))_m \in \mathbb{R}^3$,
+$\ell_q = |x'(s_q)|$ et $x_q = x(s_q)$,
+\[
+S^E = \sum_{q} w_q\, \ell_q\, \alpha(x_q)\, \Theta_q \Theta_q^{\top},
+\qquad
+G^E = \sum_{q} w_q\, \ell_q\, g(x_q)\, \Theta_q .
+\]
+$S^E$ s'ajoute à $A$ et $G^E$ à $F$ pour les arêtes de $\Gamma_R$ ; pour celles
+de $\Gamma_N$, seul $G^E$ s'ajoute ($\alpha = 0$). On refuse $\alpha(x_q) < 0$.
+
+\paragraph{Système final.} Le raisonnement de la section~\ref{sec:dirichlet}
+s'applique en remplaçant $\mathcal{B}$ par l'ensemble des nœuds des zones de
+Dirichlet, les autres nœuds de bord restant des inconnues. Un nœud commun à
+une zone de Dirichlet et à une autre zone (coin de $\Omega$) est un nœud de
+Dirichlet. S'il est commun à deux zones de Dirichlet, il reçoit la valeur de
+la dernière dans l'ordre ci-dessus. La matrice $A_{\mathcal{I}\mathcal{I}}$
+reste symétrique. Elle est définie positive sous la condition de la
+section~\ref{sec:general}.
+
+\paragraph{Contrôle de la coercivité.} La condition de la
+section~\ref{sec:general} est vérifiée pour chaque composante connexe de $D$,
+obtenue à partir de la connectivité des éléments. Soit $c$ une composante sans
+nœud de Dirichlet et $\mathbf{1}_c$ le vecteur valant $1$ sur ses nœuds et $0$
+ailleurs. La rigidité ne contribue pas sur une constante, donc
+\[
+\mathbf{1}_c^{\top} A\, \mathbf{1}_c = \int_c k + \int_{\partial c \cap \Gamma_R} \alpha\, \mathrm{d}s .
+\]
+Si cette quantité est nulle (inférieure à $10^{-12}$ fois la somme des termes
+diagonaux de $A$ sur $c$), $\mathbf{1}_c$ est dans le noyau de $A$ : le calcul
+est refusé, et le message indique les zones qui bordent la composante.
+
+\subsection{Flux à travers le bord et bilan}
+\label{sec:flux}
+
+Le flux sortant de $D$ à travers une zone $Z$, c'est-à-dire le flux de
+$q = -\nu \nabla u$, est
+\[
+\Phi_Z = -\int_Z \nu\, \partial_n u \,\mathrm{d}s .
+\]
+\begin{itemize}
+  \item Sur une zone de Neumann ou de Robin, $\nu\, \partial_n u = g - \alpha u$
+        (avec $\alpha = 0$ pour Neumann) est connu, et
+        $\Phi_Z = -\int_Z (g - \alpha u_h)\, \mathrm{d}s$ est calculé avec la
+        quadrature de la section~\ref{sec:robin}.
+  \item Sur une zone de Dirichlet, on utilise la \emph{méthode du résidu},
+        plus précise que la dérivation de $u_h$. Le vecteur $r = A U - F$
+        (système complet, termes de bord compris) est nul aux nœuds libres
+        et vérifie $r_i \approx \int_{\Gamma_D} \nu\, \partial_n u\, \varphi_i$
+        aux nœuds de Dirichlet. Comme $\sum_i \varphi_i = 1$ sur la zone,
+        $\Phi_Z = -\sum_{i \in Z} r_i$.
+\end{itemize}
+Une courbe de $\partial\beta$ est fermée et ne partage aucun nœud avec une
+autre zone. En revanche, un coin de $\Omega$ commun à deux côtés de Dirichlet
+n'a qu'un seul résidu pour deux côtés, et le partager à parts égales donne
+une erreur en $O(h)$ sur chaque côté. Pour un tel nœud $i$, commun à $m$ zones
+$Z$, on calcule directement dans le carré $Q_2$ du coin (Gauss--Legendre à
+4 points le long du côté)
+$E_{i,Z} = \int_Z \nu\, \partial_n u_h\, \varphi_i\, \mathrm{d}s$, et la part
+de $r_i$ attribuée à $Z$ est
+\[
+E_{i,Z} + \frac{1}{m}\Big( r_i - \sum_{Z'} E_{i,Z'} \Big).
+\]
+
+\paragraph{Bilan.} En sommant les lignes de $A U - F$ et avec
+$\sum_i \varphi_i = 1$, on obtient, à la précision machine près,
+\[
+\sum_Z \Phi_Z = \int_D f - \int_D k\, u_h ,
+\]
+les intégrales étant calculées avec la quadrature de l'assemblage. L'écart
+relatif entre les deux membres est affiché : il doit être de l'ordre de
+$10^{-14}$.
 
 \subsection{Récapitulatif des tableaux}
 
@@ -1668,9 +1837,12 @@ Nom & Taille & Contenu \\
 \texttt{quad}   & $n_Q \times 9$ & numéros globaux des nœuds de chaque quadrilatère \\
 \texttt{bnd}    & $|\mathcal{B}|$ & indices des nœuds de $\partial\Omega \cup \partial\beta$ \\
 \texttt{bnd\_beta} & $|\mathcal{B}_\beta|$ & indices des nœuds de $\partial\beta$ (sous-ensemble de \texttt{bnd}) \\
+\texttt{edges}  & $m \times 3$ & arêtes $P_2$ de bord : deux extrémités puis milieu \\
+\texttt{edge\_zone} & $m$ & numéro de la zone de chaque arête de bord \\
+\texttt{zones}  & $4 + n_\beta$ & noms des zones : quatre côtés, puis courbes de $\partial\beta$ \\
 $A^K$, $F^K$    & $n_K \times n_K$, $n_K$ & matrice et vecteur élémentaires \\
-$A$             & $N \times N$ (creuse) & $R + k\, M$ assemblée \\
-$F$             & $N$ & second membre assemblé \\
+$A$             & $N \times N$ (creuse) & $R + k\, M$ assemblée, plus termes de Robin \\
+$F$             & $N$ & second membre assemblé, termes de bord compris \\
 $U$             & $N$ & valeurs de $u_h$ aux nœuds \\
 \hline
 \end{tabular}
@@ -1761,6 +1933,48 @@ dans les fonctions de base, la numérotation locale ou l'assemblage. Une
 erreur qui stagne dès le premier pas indique souvent que $g_\beta$ n'est pas
 imposée (ou mal évaluée) aux nœuds de $\partial\beta$.
 
+\subsection{Coefficients variables et conditions mixtes}
+\label{sec:validation-generale}
+
+Le problème $(P_G)$ est validé par une seconde solution manufacturée, dans les
+tests automatiques (section~\ref{sec:tests}) : sur le disque de validation,
+\[
+u_{\mathrm{ex}} = \cos(0.7\, x)\, e^{0.2\, y} + 0.1\, x y,
+\qquad
+\nu = 1 + \tfrac12 \sin x \cos y,
+\qquad
+k = 1 + \frac{x}{L_x},
+\]
+et $f = -\nu\, \Delta u_{\mathrm{ex}} - \nabla\nu \cdot \nabla u_{\mathrm{ex}}
++ k\, u_{\mathrm{ex}}$. Les conditions sont : Neumann sur $\partial\beta$
+(arête courbe, $g = \nu\, \partial_n u_{\mathrm{ex}}$), Robin sur
+\texttt{bas} ($\alpha = 2$) et sur \texttt{droite} ($\alpha = 1 + y$), avec
+$g = \nu\, \partial_n u_{\mathrm{ex}} + \alpha\, u_{\mathrm{ex}}$, et Dirichlet
+$u = u_{\mathrm{ex}}$ sur \texttt{haut} et \texttt{gauche}. Avec les pas de
+la section précédente, on obtient :
+\begin{center}
+\begin{tabular}{rrcccc}
+\hline
+$h$ & nœuds & erreur $L^2$ & ordre & erreur $H^1$ & ordre \\
+\hline
+$0.5$    & $958$   & $1.405 \cdot 10^{-3}$ & -- & $2.216 \cdot 10^{-2}$ & -- \\
+$0.25$   & $2856$  & $1.847 \cdot 10^{-4}$ & $2.93$ & $5.752 \cdot 10^{-3}$ & $1.95$ \\
+$0.125$  & $9796$  & $2.344 \cdot 10^{-5}$ & $2.98$ & $1.455 \cdot 10^{-3}$ & $1.98$ \\
+$0.0625$ & $35928$ & $2.950 \cdot 10^{-6}$ & $2.99$ & $3.660 \cdot 10^{-4}$ & $1.99$ \\
+\hline
+\end{tabular}
+\end{center}
+On retrouve les ordres 3 et 2 attendus. Le bilan de la
+section~\ref{sec:flux} est vérifié à $10^{-10}$ près en relatif (test), et les
+flux sont comparés à leurs valeurs exactes : à $h = 0.25$, l'écart est de
+l'ordre de $10^{-6}$ en relatif sur \texttt{haut} (zone de Dirichlet avec un
+coin partagé) comme sur $\partial\beta$.
+
+L'étude de convergence de \texttt{python3 main.py validation} accepte aussi un
+coefficient $k$ variable (option \texttt{-{}-k}), remplacé par $k(x,y)$ dans
+l'expression de $f$ ci-dessus ; avec $k = 1 + x/L_x$, on observe les ordres
+$2.97$ et $1.97$ entre $h = 0.125$ et $h = 0.0625$.
+
 \subsection{Cas d'application}
 
 Une fois le code validé, on le lance sur l'obstacle en forme de cacahuète
@@ -1813,6 +2027,7 @@ $h_\beta$        & $0.15$       & pas sur $\partial\beta$ \\
 $\delta$         & $0.8$        & largeur de la zone de transition \\
 $m_\beta$        & $1$         & distance minimale entre $\mathcal{Q}$ et $\beta$ ($m_\beta > h/2$) \\
 $r$              & $1$         & intensité du raffinement a priori ($0$ : aucun) \\
+$\nu$, $k$       & $1$, $1$    & coefficients de $(P_G)$ (nombres ou expressions) \\
 disque           & $c = (3.5, 2.5)$, $R = 1$ & obstacle de validation \\
 cacahuète        & $c = (3.1, 2.63)$, $r_0 = 0.8$, & obstacle d'application \\
                  & $\varepsilon = 0.35$ & (puis translatée avec $\Omega$) \\
@@ -1830,12 +2045,15 @@ Module & Contenu \\
 \texttt{geometry.py}  & $r(\theta)$, $\gamma(t)$, test $x \in \beta$, $d(x,\beta)$, \\
                       & polygone, obstacle troué, réunion (\texttt{union}), \\
                       & lecture STEP (\texttt{from\_step}), construction de $\Omega$ \\
-\texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2 \\
+\texttt{mesh.py}      & sélection de $\mathcal{Q}$, appel à \texttt{gmsh}, numérotation, nœuds P2/Q2, \\
+                      & arêtes de bord et zones \\
 \texttt{sizing.py}    & raffinement a priori : sources aux coins et interstices, taille $h_r$ \\
 \texttt{reference.py} & $\widehat{\psi}_k$, $\nabla\widehat{\psi}_k$, points et poids de quadrature \\
-\texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$ (signe de $\det D\Phi_K$ vérifié), $R^K$, $M^K$, $F^K$, \\
-                      & assemblage creux, erreurs par élément \\
-\texttt{solver.py}    & élimination des nœuds de $\mathcal{B}$ ($U_\mathcal{B} = G_\mathcal{B}$), résolution \\
+\texttt{assembly.py}  & $\Phi_K$, $D\Phi_K$ (signe de $\det D\Phi_K$ vérifié), $A^K$, $F^K$, termes de bord \\
+                      & $S^E$, $G^E$, assemblage creux, erreurs par élément \\
+\texttt{solver.py}    & conditions par zone (\texttt{BC}), élimination de Dirichlet, résolution \\
+\texttt{expressions.py} & expressions de $x$, $y$ saisies, vérifiées avant évaluation \\
+\texttt{post.py}      & intégrales sur $D$, flux par zone et bilan, exports VTU et CSV \\
 \texttt{config.py}    & paramètres par défaut, dossier \texttt{resultats/} \\
 \texttt{cases.py}     & cas prédéfinis, obstacles composés, maillage et résolution d'un cas \\
 \texttt{validation.py} & solution manufacturée, étude de convergence, erreur par élément \\
@@ -1872,6 +2090,14 @@ exécute en quelques secondes :
         éléments droits ($k = 0$ et $k = 1$) ;
   \item \textbf{convergence} : ordres supérieurs à $2.7$ en $L^2$ et à $1.8$
         en $H^1$ sur $h = 0.5$, $0.25$, $0.125$ ;
+  \item \textbf{coefficients et conditions} (\texttt{test\_problem.py}) :
+        ordres de la section~\ref{sec:validation-generale} (supérieurs à
+        $2.7$ et $1.8$), bilan et flux exacts, longueurs des zones de bord,
+        conditions par défaut égales à un Dirichlet explicite, coercivité
+        contrôlée par composante connexe (cavité sans Dirichlet, ni Robin,
+        ni $k > 0$ refusée, acceptée sinon), refus de $\nu \le 0$, de $\alpha < 0$ et d'une
+        zone inconnue, expressions refusées (attributs, noms inconnus, nombre
+        d'arguments), relecture des exports VTU et CSV ;
   \item \textbf{garde-fous} : $m_\beta \le h/2$, $r(\theta) \le 0$, composantes
         d'un \texttt{MultiObstacle} imbriquées ou qui se chevauchent, trou qui
         sort du bord extérieur, trous qui se chevauchent, couronne avec
@@ -1925,8 +2151,8 @@ saisie qui n'est pas un nombre, est signalé en rouge dans le titre et
 ignoré. Sans affichage,
 la question est posée au terminal après validation : Entrée garde la source
 du cas, \texttt{g} demande $x_0$, $y_0$ (redemandés tant que le point n'est
-pas dans $D$) et $\sigma$. Avec \texttt{--gauss} ou \texttt{-y}, rien n'est
-demandé.
+pas dans $D$) et $\sigma$. Avec \texttt{-{}-gauss}, \texttt{-{}-f} ou \texttt{-y},
+rien n'est demandé.
 
 \paragraph{Ligne de commande.}
 \begin{center}
@@ -1941,32 +2167,79 @@ Commande & Effet \\
                                         \texttt{puzzle\_gauss}, \\
                                       & \texttt{non\_connexe}, \texttt{tangents}, \texttt{couronne}, \\
                                       & \texttt{fusion}, \texttt{eloignes} \\
-\texttt{python3 main.py --step f.step} & obstacle lu dans un fichier STEP / IGES / BREP
-                                         (\texttt{--echelle}) \\
-\texttt{python3 main.py --obstacle \dots} & $\beta$ composé, option à répéter
+\texttt{python3 main.py -{}-step f.step} & obstacle lu dans un fichier STEP / IGES / BREP
+                                         (\texttt{-{}-echelle}) \\
+\texttt{python3 main.py -{}-obstacle \dots} & $\beta$ composé, option à répéter
                                             pour chaque composante \\
-\texttt{python3 main.py \textit{cas} --gauss $x_0$ $y_0$} & source gaussienne
-                                        $f(x_0, y_0) = 1$ (\texttt{--sigma}) \\
+\texttt{python3 main.py \textit{cas} -{}-gauss $x_0$ $y_0$} & source gaussienne
+                                        $f(x_0, y_0) = 1$ (\texttt{-{}-sigma}) \\
+\texttt{python3 main.py \textit{cas} -{}-f \textit{expr}} & source, coefficients (\texttt{-{}-a}, \texttt{-{}-k}) \\
+                                        & et conditions (\texttt{-{}-cl}) : voir plus bas \\
 \texttt{python3 main.py validation} & étude de convergence (section~\ref{sec:validation}) \\
 \texttt{python3 main.py erreurs} & erreur de chaque élément du cas de validation \\
-                                  & (pas \texttt{--h}), carte cliquable \\
+                                  & (pas \texttt{-{}-h}), carte cliquable \\
 \texttt{python3 main.py tous} & validation et tous les cas prédéfinis en parallèle, \\
                               & sans validation du maillage \\
 \hline
 \end{tabular}
 \end{center}
-Les options \texttt{--h}, \texttt{--h-beta}, \texttt{--delta} et
-\texttt{--m-beta} changent les paramètres de maillage (strictement positifs,
-avec $m_\beta > h/2$), \texttt{--raffinement} l'intensité $r \ge 0$ du
-raffinement a priori (1 par défaut, 0 pour le désactiver), \texttt{--k} le
-coefficient $k \ge 0$ de l'équation (1 par défaut ; pour une autre valeur,
-les figures de solution et de validation prennent le suffixe
-\texttt{\_k<valeur>}), \texttt{--gauss} $x_0$ $y_0$ et \texttt{--sigma}
+Les options \texttt{-{}-h}, \texttt{-{}-h-beta}, \texttt{-{}-delta} et
+\texttt{-{}-m-beta} changent les paramètres de maillage (strictement positifs,
+avec $m_\beta > h/2$), \texttt{-{}-raffinement} l'intensité $r \ge 0$ du
+raffinement a priori (1 par défaut, 0 pour le désactiver), \texttt{-{}-k} le
+coefficient $k \ge 0$ de l'équation, nombre ou expression (1 par défaut ; pour
+une autre valeur, les figures de solution et de validation prennent le suffixe
+\texttt{\_k<valeur>}, ou une empreinte du texte pour une expression),
+\texttt{-{}-gauss} $x_0$ $y_0$ et \texttt{-{}-sigma}
 (défaut $0.5$, $\sigma > 0$) la source gaussienne, dont le centre est
 vérifié après le maillage (erreur s'il n'est pas dans $D$), et \texttt{-y}
-(\texttt{--oui}) valide le maillage sans l'afficher. Dans le mode
+(\texttt{-{}-oui}) valide le maillage sans l'afficher. Dans le mode
 \texttt{tous} et pour l'étude de convergence, chaque calcul tourne dans son
 propre processus (\texttt{ProcessPoolExecutor}), sans fenêtre.
+
+\paragraph{Source, coefficients et conditions aux limites.} Les options
+\texttt{-{}-f}, \texttt{-{}-a} (coefficient $\nu$ de $(P_G)$) et \texttt{-{}-k}
+acceptent un nombre ou une expression, et \texttt{-{}-cl} se répète pour chaque
+condition :
+\begin{verbatim}
+python3 main.py disque --f "sin(pi*x/Lx)" --a "1 + 9*(x > Lx/2)" --k 0 \
+    --cl beta robin 5 20 --cl gauche neumann 0
+\end{verbatim}
+Une expression peut utiliser $x$, $y$, \texttt{Lx}, \texttt{Ly}, \texttt{pi},
+\texttt{e}, les opérateurs \texttt{+ - * / **} (ou \verb|^|), les comparaisons,
+qui valent $0$ ou $1$, et les fonctions \texttt{sin}, \texttt{cos},
+\texttt{tan}, \texttt{arcsin}, \texttt{arccos}, \texttt{arctan},
+\texttt{arctan2}, \texttt{sinh}, \texttt{cosh}, \texttt{tanh}, \texttt{exp},
+\texttt{log}, \texttt{log10}, \texttt{sqrt}, \texttt{abs}, \texttt{hypot},
+\texttt{minimum}, \texttt{maximum}, \texttt{where}, \texttt{sign},
+\texttt{floor} et \texttt{ceil}. L'arbre syntaxique est vérifié avant toute
+évaluation : les attributs, les indices, les noms inconnus ou un mauvais nombre
+d'arguments sont refusés. Les options sont \texttt{-{}-cl ZONE TYPE \dots}, avec
+\begin{center}
+\begin{tabular}{ll}
+\hline
+Argument & Valeurs \\
+\hline
+\texttt{ZONE} & \texttt{omega} (les quatre côtés), \texttt{bas}, \texttt{droite},
+                \texttt{haut}, \texttt{gauche}, \\
+              & \texttt{beta} (toutes les courbes), \texttt{beta1},
+                \texttt{beta2}, \dots \\
+\texttt{dirichlet [G]} & $u = G$ \\
+\texttt{neumann [G]}   & $\nu\, \partial_n u = G$ \\
+\texttt{robin ALPHA [G]} & $\nu\, \partial_n u + \alpha\, u = G$ \\
+\hline
+\end{tabular}
+\end{center}
+$G$ vaut $0$ par défaut ; $G$ et $\alpha$ sont des nombres ou des expressions.
+Les conditions s'appliquent dans l'ordre donné, la dernière l'emportant sur
+une zone désignée plusieurs fois. Les zones non désignées gardent la condition
+du cas : $u = 0$ sur $\partial\Omega$, $u = g_\beta$ sur $\partial\beta$. Quand
+$\partial\beta$ a plusieurs courbes, leurs numéros sont écrits sur les figures.
+Une zone qui n'existe pas pour ce maillage (par exemple \texttt{beta5}) est
+signalée après le maillage. \texttt{-{}-f} et \texttt{-{}-gauss} s'excluent ; les
+options \texttt{-{}-f}, \texttt{-{}-a} et \texttt{-{}-cl} sont refusées dans les modes
+\texttt{validation}, \texttt{tous} et \texttt{erreurs}. Elles ne s'appliquent
+pas à un nouvel obstacle choisi après le refus d'un maillage.
 
 \paragraph{Obstacle composé.} $\beta$ peut être construit comme réunion de
 composantes dont on choisit le type et les paramètres :
@@ -1987,7 +2260,7 @@ Composante & Paramètres \\
 Une composante lue dans un fichier peut elle-même être non connexe : toutes
 ses composantes sont ajoutées. Par exemple
 \[
-\texttt{python3 main.py --obstacle disque 0 0 1 --obstacle polygone 4 0}
+\texttt{python3 main.py -{}-obstacle disque 0 0 1 -{}-obstacle polygone 4 0}
 \]
 réunit un disque de rayon $1$ et le polygone en L translaté de $(4, 0)$. Les
 composantes qui se chevauchent sont réunies (section~\ref{sec:union}) ; on
@@ -1996,7 +2269,7 @@ obtient un obstacle connexe, éventuellement troué, ou un
 section~\ref{sec:construction} que les composantes soient proches ou
 éloignées. Par exemple
 \[
-\texttt{python3 main.py --obstacle couronne 0 0 2 1 --obstacle disque 1.5 0 0.8}
+\texttt{python3 main.py -{}-obstacle couronne 0 0 2 1 -{}-obstacle disque 1.5 0 0.8}
 \]
 donne une couronne dont la cavité est entamée par le disque.
 
@@ -2019,9 +2292,9 @@ ci-dessus.
         par obstacle : \texttt{disque}, \texttt{cacahuete}, \texttt{polygone},
         \texttt{step}, \texttt{puzzle}, \texttt{non\_connexe},
         \texttt{tangents}, \texttt{couronne}, \texttt{fusion}, \texttt{eloignes},
-        \texttt{compose/<types>\_<empreinte>} (obstacle
+        \texttt{compose/\allowbreak<types>\_\allowbreak<empreinte>} (obstacle
         composé, l'empreinte distinguant deux jeux de paramètres) et le nom
-        du fichier en minuscules pour \texttt{--step} (suivi de
+        du fichier en minuscules pour \texttt{-{}-step} (suivi de
         \texttt{\_x<échelle>} si l'échelle n'est pas 1). Les figures du cas de
         validation sont dans \texttt{validation/}.
   \item \texttt{maillage.png} : les quadrilatères, les triangles et $\beta$,
@@ -2030,12 +2303,24 @@ ci-dessus.
         variantes du cas : \texttt{\_dirichlet} (cacahuète avec
         $u = g_\beta$ sur $\partial\beta$), \texttt{\_gauss}
         (\texttt{puzzle\_gauss}), \texttt{\_gauss\_$x_0$\_$y_0$\_s$\sigma$}
-        (source gaussienne choisie), puis \texttt{\_k<valeur>} si $k \ne 1$.
+        (source gaussienne choisie), \texttt{\_<empreinte>} (\texttt{-{}-f},
+        \texttt{-{}-a} ou \texttt{-{}-cl}), puis \texttt{\_k<valeur>} si $k \ne 1$.
         Le cas de validation donne \texttt{validation/solution.png}. Pour l'affichage, chaque
         triangle $P_2$ est découpé en 4 sous-triangles et chaque carré $Q_2$
         en 8 à l'aide des nœuds milieux, puis on trace le résultat avec
         \texttt{matplotlib.pyplot.tripcolor}. Une triangulation de Delaunay
         de tous les nœuds ne convient pas : elle traverserait $\beta$.
+  \item \texttt{solution*.vtu} : maillage et $u_h$ au format VTK XML, avec
+        les éléments quadratiques (triangle 22, quadrilatère biquadratique 28,
+        mêmes numérotations locales que \texttt{tri} et \texttt{quad}), à
+        ouvrir avec ParaView.
+  \item \texttt{solution*.csv} : les colonnes $x$, $y$, $u$, un nœud par ligne.
+  \item \texttt{grandeurs*.txt} : $|D|$, $\int_D u$, la moyenne de $u$,
+        $\int_D f$, $\int_D k\, u$, le flux sortant $\Phi_Z$ de chaque zone
+        (avec son type de condition), les totaux sur $\partial\Omega$ et
+        $\partial\beta$ et le bilan (section~\ref{sec:flux}). Ces grandeurs
+        sont aussi affichées dans le terminal. Ces trois fichiers portent le
+        même suffixe que la solution.
   \item \texttt{validation/erreurs\_elements.png} : carte des densités
         $e_K / \sqrt{|K|}$ du cas de validation (échelle logarithmique). En
         mode interactif, un clic sur un élément affiche $|K|$, $e_K$ et
